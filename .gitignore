@@ -1,0 +1,19 @@
+# Maven build output
+target/
+
+# Editors / IDEs
+.vscode/
+.idea/
+*.iml
+.classpath
+.project
+.settings/
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# Logs and local data (later: persistence files from the server)
+*.log
+*.aof
+dump.rdb
