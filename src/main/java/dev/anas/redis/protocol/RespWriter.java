@@ -5,7 +5,8 @@ import java.nio.charset.StandardCharsets;
 
 public final class RespWriter {
 
-    private RespWriter() {}
+    private RespWriter() {
+    }
 
     // Serialize a Reply to RESP2 bytes.
     public static byte[] write(Reply reply) {
@@ -47,10 +48,10 @@ public final class RespWriter {
     }
 
     private static byte[] ascii(String s) {
-        // Encode as ASCII. 
-        // Non-ASCII chars are replaced with '?' — per RESP, 
+        // Encode as ASCII.
+        // Non-ASCII chars are replaced with '?' — per RESP,
         // simple strings and errors must be ASCII-only.
-        
+
         return s.getBytes(StandardCharsets.US_ASCII);
     }
 }

@@ -32,7 +32,7 @@ class RespParserTest {
         ParseResult.Parsed parsed = (ParseResult.Parsed) result;
 
         assertEquals(3, parsed.args().length);
-        assertEquals("set",  str(parsed.args()[0]));
+        assertEquals("set", str(parsed.args()[0]));
         assertEquals("name", str(parsed.args()[1]));
         assertEquals("anas", str(parsed.args()[2]));
     }
@@ -69,7 +69,7 @@ class RespParserTest {
 
         ParseResult.Parsed parsed = (ParseResult.Parsed) second;
         assertEquals(3, parsed.args().length);
-        assertEquals("set",  str(parsed.args()[0]));
+        assertEquals("set", str(parsed.args()[0]));
         assertEquals("name", str(parsed.args()[1]));
         assertEquals("anas", str(parsed.args()[2]));
     }

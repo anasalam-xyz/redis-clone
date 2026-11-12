@@ -22,7 +22,7 @@ class RespWriterTest {
     @Test
     void writesError() {
         assertArrayEquals(bytes("-ERR unknown command\r\n"),
-                          RespWriter.write(new Reply.Error("ERR unknown command")));
+                RespWriter.write(new Reply.Error("ERR unknown command")));
     }
 
     @Test
@@ -38,13 +38,13 @@ class RespWriterTest {
     @Test
     void writesBulkString() {
         assertArrayEquals(bytes("$5\r\nhello\r\n"),
-                          RespWriter.write(new Reply.BulkString(bytes("hello"))));
+                RespWriter.write(new Reply.BulkString(bytes("hello"))));
     }
 
     @Test
     void writesEmptyBulkString() {
         assertArrayEquals(bytes("$0\r\n\r\n"),
-                          RespWriter.write(new Reply.BulkString(new byte[0])));
+                RespWriter.write(new Reply.BulkString(new byte[0])));
     }
 
     @Test
@@ -61,17 +61,17 @@ class RespWriterTest {
     @Test
     void writesEmptyArray() {
         assertArrayEquals(bytes("*0\r\n"),
-                          RespWriter.write(new Reply.Array(List.of())));
+                RespWriter.write(new Reply.Array(List.of())));
     }
 
     @Test
     void writesNestedArray() {
-        // *2\r\n  *1\r\n:1\r\n  *2\r\n:2\r\n:3\r\n
+        // *2\r\n *1\r\n:1\r\n *2\r\n:2\r\n:3\r\n
         Reply inner1 = new Reply.Array(List.of(new Reply.Integer(1)));
         Reply inner2 = new Reply.Array(List.of(new Reply.Integer(2), new Reply.Integer(3)));
-        Reply outer  = new Reply.Array(List.of(inner1, inner2));
+        Reply outer = new Reply.Array(List.of(inner1, inner2));
         assertArrayEquals(bytes("*2\r\n*1\r\n:1\r\n*2\r\n:2\r\n:3\r\n"),
-                          RespWriter.write(outer));
+                RespWriter.write(outer));
     }
 
     @Test
@@ -100,7 +100,7 @@ class RespWriterTest {
     @Test
     void bulkStringPayloadIsNotMangledForBinary() {
         // Null byte, high-bit byte, CR, LF, and a byte that's invalid UTF-8 on its own.
-        byte[] data = {0x00, (byte) 0xFF, '\r', '\n', (byte) 0x80};
+        byte[] data = { 0x00, (byte) 0xFF, '\r', '\n', (byte) 0x80 };
         byte[] out = RespWriter.write(new Reply.BulkString(data));
 
         // Header "$5\r\n" is 4 bytes; then the 5 payload bytes; then "\r\n".
