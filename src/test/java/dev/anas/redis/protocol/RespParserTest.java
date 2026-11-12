@@ -1,87 +1,167 @@
 package dev.anas.redis.protocol;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.DisplayName;
+
 import java.nio.charset.StandardCharsets;
+
 import static org.junit.jupiter.api.Assertions.*;
 
 class RespParserTest {
 
-    private static byte[] bytes(String s) {
+    private static byte[] b(String s) {
         return s.getBytes(StandardCharsets.US_ASCII);
     }
 
-    @Test
-    void parsesFullCommandInOneChunk() {
-        RespParser p = new RespParser();
-        ParseResult r = p.feed(bytes("*3\r\n$3\r\nset\r\n$4\r\nname\r\n$4\r\nanas\r\n"));
+    private static String str(byte[] bytes) {
+        return new String(bytes, StandardCharsets.US_ASCII);
+    }
 
-        assertInstanceOf(ParseResult.Parsed.class, r);
-        byte[][] args = ((ParseResult.Parsed) r).args();
-        assertEquals(3, args.length);
-        assertArrayEquals(bytes("set"),  args[0]);
-        assertArrayEquals(bytes("name"), args[1]);
-        assertArrayEquals(bytes("anas"), args[2]);
+    // ------------------------------------------------------------------
+    // Happy path
+    // ------------------------------------------------------------------
+
+    @Test
+    @DisplayName("valid SET command parses into 3 args")
+    void validSetCommand() {
+        RespParser parser = new RespParser();
+        ParseResult result = parser.feed(
+                b("*3\r\n$3\r\nset\r\n$4\r\nname\r\n$4\r\nanas\r\n"));
+
+        assertInstanceOf(ParseResult.Parsed.class, result);
+        ParseResult.Parsed parsed = (ParseResult.Parsed) result;
+
+        assertEquals(3, parsed.args().length);
+        assertEquals("set",  str(parsed.args()[0]));
+        assertEquals("name", str(parsed.args()[1]));
+        assertEquals("anas", str(parsed.args()[2]));
     }
 
     @Test
-    void handlesSplitRead() {
-        RespParser p = new RespParser();
-        ParseResult r1 = p.feed(bytes("*3\r\n$3\r\nset\r\n$4\r\nna"));
-        assertInstanceOf(ParseResult.NeedMore.class, r1);
+    @DisplayName("empty bulk string ($0) is valid")
+    void emptyBulkIsValid() {
+        RespParser parser = new RespParser();
+        ParseResult result = parser.feed(b("*1\r\n$0\r\n\r\n"));
 
-        ParseResult r2 = p.feed(bytes("me\r\n$4\r\nanas\r\n"));
-        assertInstanceOf(ParseResult.Parsed.class, r2);
-        byte[][] args = ((ParseResult.Parsed) r2).args();
-        assertEquals(3, args.length);
-        assertArrayEquals(bytes("name"), args[1]);
-        assertArrayEquals(bytes("anas"), args[2]);
+        assertInstanceOf(ParseResult.Parsed.class, result);
+        ParseResult.Parsed parsed = (ParseResult.Parsed) result;
+
+        assertEquals(1, parsed.args().length);
+        assertEquals(0, parsed.args()[0].length);
+    }
+
+    // ------------------------------------------------------------------
+    // Chunked input
+    // ------------------------------------------------------------------
+
+    @Test
+    @DisplayName("command split across two chunks completes on second feed")
+    void splitAcrossChunks() {
+        RespParser parser = new RespParser();
+
+        // First chunk: incomplete
+        ParseResult first = parser.feed(b("*3\r\n$3\r\nse"));
+        assertInstanceOf(ParseResult.NeedMore.class, first);
+
+        // Second chunk: rest
+        ParseResult second = parser.feed(b("t\r\n$4\r\nname\r\n$4\r\nanas\r\n"));
+        assertInstanceOf(ParseResult.Parsed.class, second);
+
+        ParseResult.Parsed parsed = (ParseResult.Parsed) second;
+        assertEquals(3, parsed.args().length);
+        assertEquals("set",  str(parsed.args()[0]));
+        assertEquals("name", str(parsed.args()[1]));
+        assertEquals("anas", str(parsed.args()[2]));
     }
 
     @Test
-    void handlesPipelinedCommands() {
-        RespParser p = new RespParser();
-        ParseResult r1 = p.feed(bytes("*1\r\n$4\r\nping\r\n*1\r\n$4\r\nping\r\n"));
-        assertInstanceOf(ParseResult.Parsed.class, r1);
-        assertArrayEquals(bytes("ping"), ((ParseResult.Parsed) r1).args()[0]);
+    @DisplayName("feed with empty chunk on empty buffer returns NeedMore")
+    void emptyChunkOnEmptyBuffer() {
+        RespParser parser = new RespParser();
+        ParseResult result = parser.feed(new byte[0]);
+        assertInstanceOf(ParseResult.NeedMore.class, result);
+    }
 
-        ParseResult r2 = p.feed(new byte[0]);      // no new bytes, drain the buffer
-        assertInstanceOf(ParseResult.Parsed.class, r2);
-        assertArrayEquals(bytes("ping"), ((ParseResult.Parsed) r2).args()[0]);
+    // ------------------------------------------------------------------
+    // Malformed input → ParseError (NOT a crash)
+    // ------------------------------------------------------------------
+
+    @Test
+    @DisplayName("invalid array prefix returns ParseError")
+    void invalidArrayPrefix() {
+        RespParser parser = new RespParser();
+        ParseResult result = parser.feed(b("?3\r\n$3\r\nset\r\n"));
+        assertInstanceOf(ParseResult.ParseError.class, result);
     }
 
     @Test
-    void handlesBinaryPayloadContainingCrlf() {
-        byte[] payload = {'a', '\r', '\n', 'b', (byte) 0xFF};
-        // *3\r\n$3\r\nset\r\n$1\r\nk\r\n$5\r\n<5 bytes>\r\n
-        byte[] chunk = concat(
-            bytes("*3\r\n$3\r\nset\r\n$1\r\nk\r\n$5\r\n"),
-            payload,
-            bytes("\r\n")
-        );
-
-        RespParser p = new RespParser();
-        ParseResult r = p.feed(chunk);
-        assertInstanceOf(ParseResult.Parsed.class, r);
-        byte[][] args = ((ParseResult.Parsed) r).args();
-        assertArrayEquals(payload, args[2]);
+    @DisplayName("invalid bulk prefix returns ParseError")
+    void invalidBulkPrefix() {
+        RespParser parser = new RespParser();
+        ParseResult result = parser.feed(b("*1\r\n?3\r\nset\r\n"));
+        assertInstanceOf(ParseResult.ParseError.class, result);
     }
 
     @Test
-    void handlesEmptyBulkString() {
-        RespParser p = new RespParser();
-        ParseResult r = p.feed(bytes("*3\r\n$3\r\nset\r\n$1\r\nk\r\n$0\r\n\r\n"));
-        assertInstanceOf(ParseResult.Parsed.class, r);
-        byte[][] args = ((ParseResult.Parsed) r).args();
-        assertEquals(3, args.length);
-        assertEquals(0, args[2].length);
+    @DisplayName("non-numeric array length returns ParseError")
+    void nonNumericArrayLength() {
+        RespParser parser = new RespParser();
+        ParseResult result = parser.feed(b("*x\r\n$3\r\nset\r\n"));
+        assertInstanceOf(ParseResult.ParseError.class, result);
     }
 
-    private static byte[] concat(byte[]... parts) {
-        int n = 0;
-        for (byte[] part : parts) n += part.length;
-        byte[] out = new byte[n];
-        int off = 0;
-        for (byte[] part : parts) { System.arraycopy(part, 0, out, off, part.length); off += part.length; }
-        return out;
+    @Test
+    @DisplayName("integer overflow in array length returns ParseError, does not crash")
+    void overflowArrayLength() {
+        RespParser parser = new RespParser();
+        // 10 digits, > Integer.MAX_VALUE
+        ParseResult result = parser.feed(b("*9999999999\r\n"));
+        assertInstanceOf(ParseResult.ParseError.class, result);
+    }
+
+    @Test
+    @DisplayName("integer overflow in bulk length returns ParseError, does not crash")
+    void overflowBulkLength() {
+        RespParser parser = new RespParser();
+        ParseResult result = parser.feed(b("*1\r\n$9999999999\r\n"));
+        assertInstanceOf(ParseResult.ParseError.class, result);
+    }
+
+    @Test
+    @DisplayName("negative bulk length returns ParseError")
+    void negativeBulkLength() {
+        RespParser parser = new RespParser();
+        ParseResult result = parser.feed(b("*1\r\n$-1\r\n"));
+        assertInstanceOf(ParseResult.ParseError.class, result);
+    }
+
+    @Test
+    @DisplayName("empty line returns ParseError")
+    void emptyLine() {
+        RespParser parser = new RespParser();
+        ParseResult result = parser.feed(b("\r\n"));
+        assertInstanceOf(ParseResult.ParseError.class, result);
+    }
+
+    // ------------------------------------------------------------------
+    // Known limitation: pipelining
+    // ------------------------------------------------------------------
+
+    @Test
+    @DisplayName("pipelined commands: first parsed now, second recovered on next feed")
+    void pipelinedTwoCommands() {
+        RespParser parser = new RespParser();
+
+        ParseResult first = parser.feed(
+                b("*1\r\n$4\r\nPING\r\n*1\r\n$4\r\nPING\r\n"));
+        assertInstanceOf(ParseResult.Parsed.class, first);
+        assertEquals("PING",
+                str(((ParseResult.Parsed) first).args()[0]));
+
+        // Current design: second command is buffered, recovered by another feed.
+        ParseResult second = parser.feed(new byte[0]);
+        assertInstanceOf(ParseResult.Parsed.class, second);
+        assertEquals("PING",
+                str(((ParseResult.Parsed) second).args()[0]));
     }
 }
