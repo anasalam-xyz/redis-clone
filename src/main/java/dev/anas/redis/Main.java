@@ -1,36 +1,23 @@
 package dev.anas.redis;
 
-import java.io.InputStream;
-import java.io.OutputStream;
-import java.net.ServerSocket;
-import java.net.Socket;
+import dev.anas.redis.command.Dispatcher;
+import dev.anas.redis.command.handlers.*;
+import dev.anas.redis.server.Server;
+import dev.anas.redis.store.Store;
 
-public class Main {
+public final class Main {
     public static void main(String[] args) throws Exception {
-        try (ServerSocket server = new ServerSocket(6380)) {
-            System.out.println("Listening on 6380");
-            while (true) {
-                Socket client = server.accept();
-                Thread.startVirtualThread(() -> handle(client));
-            }
-        }
-    }
+        int port = 6380;
 
-    static void handle(Socket client) {
-        try (client) {
-            InputStream in = client.getInputStream();
-            OutputStream out = client.getOutputStream();
-            byte[] buf = new byte[1024];
-            int n;
-            while ((n = in.read(buf)) != -1) {
-                String raw = new String(buf, 0, n)
-                        .replace("\r", "\\r").replace("\n", "\\n");
-                System.out.println("Got " + n + " bytes: " + raw);
-                out.write("+OK\r\n".getBytes());
-                out.flush();
-            }
-        } catch (Exception e) {
-            System.out.println("Client error: " + e.getMessage());
-        }
+        Store store = new Store();
+        Dispatcher dispatcher = new Dispatcher();
+        dispatcher.register("ping", new PingCommand());
+        dispatcher.register("echo", new EchoCommand());
+        dispatcher.register("set", new SetCommand(store));
+        dispatcher.register("get", new GetCommand(store));
+        dispatcher.register("del", new DelCommand(store));
+        dispatcher.register("exists", new ExistsCommand(store));
+
+        new Server(port, dispatcher).start();
     }
 }
