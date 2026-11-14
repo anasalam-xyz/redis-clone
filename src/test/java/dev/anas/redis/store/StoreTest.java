@@ -56,18 +56,70 @@ class StoreTest {
     void expiredKeyIsInvisibleToGetAndExists() throws InterruptedException {
         Store s = new Store();
         s.set(bytes("k"), bytes("v"), System.currentTimeMillis() + 50);
-        assertNotNull(s.get(bytes("k")));       // before expiry
+        assertNotNull(s.get(bytes("k"))); // before expiry
         Thread.sleep(100);
-        assertNull(s.get(bytes("k")));          // after expiry — lazy deletion
-        assertFalse(s.exists(bytes("k")));      // exists respects expiry
+        assertNull(s.get(bytes("k"))); // after expiry — lazy deletion
+        assertFalse(s.exists(bytes("k"))); // exists respects expiry
     }
 
     @Test
     void binaryKeyAndValueRoundTrip() {
         Store s = new Store();
-        byte[] key   = {'k', 0x00, (byte) 0xFF, '\r', '\n'};
-        byte[] value = {0x00, (byte) 0x80, (byte) 0xFF, 'x'};
+        byte[] key = { 'k', 0x00, (byte) 0xFF, '\r', '\n' };
+        byte[] value = { 0x00, (byte) 0x80, (byte) 0xFF, 'x' };
         s.set(key, value, 0L);
         assertArrayEquals(value, s.get(key));
+    }
+
+    @Test
+    void setExpiryOnMissingKeyReturnsFalse() {
+        Store s = new Store();
+        assertFalse(s.setExpiry(bytes("k"), System.currentTimeMillis() + 10_000));
+    }
+
+    @Test
+    void setExpiryOnExistingKeyStoresTtl() {
+        Store s = new Store();
+        s.set(bytes("k"), bytes("v"), 0L);
+        long at = System.currentTimeMillis() + 10_000;
+
+        assertTrue(s.setExpiry(bytes("k"), at));
+        assertEquals(at, s.getExpiry(bytes("k")));
+    }
+
+    @Test
+    void getExpiryReturnsMinusOneForMissingKey() {
+        Store s = new Store();
+        assertEquals(-1L, s.getExpiry(bytes("k")));
+    }
+
+    @Test
+    void getExpiryReturnsZeroForNoTtl() {
+        Store s = new Store();
+        s.set(bytes("k"), bytes("v"), 0L);
+        assertEquals(0L, s.getExpiry(bytes("k")));
+    }
+
+    @Test
+    void persistRemovesTtl() {
+        Store s = new Store();
+        s.set(bytes("k"), bytes("v"), 0L);
+        s.setExpiry(bytes("k"), System.currentTimeMillis() + 10_000);
+
+        assertTrue(s.persist(bytes("k")));
+        assertEquals(0L, s.getExpiry(bytes("k")));
+    }
+
+    @Test
+    void persistOnKeyWithoutTtlReturnsFalse() {
+        Store s = new Store();
+        s.set(bytes("k"), bytes("v"), 0L);
+        assertFalse(s.persist(bytes("k")));
+    }
+
+    @Test
+    void persistOnMissingKeyReturnsFalse() {
+        Store s = new Store();
+        assertFalse(s.persist(bytes("k")));
     }
 }

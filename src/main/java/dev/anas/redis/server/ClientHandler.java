@@ -1,9 +1,6 @@
 package dev.anas.redis.server;
 
-import dev.anas.redis.protocol.ParseResult;
-import dev.anas.redis.protocol.Reply;
-import dev.anas.redis.protocol.RespParser;
-import dev.anas.redis.protocol.RespWriter;
+import dev.anas.redis.protocol.*;
 import dev.anas.redis.command.Dispatcher;
 import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
@@ -45,12 +42,12 @@ public final class ClientHandler implements Runnable {
                     } else if (r instanceof ParseResult.ParseError e) {
                         out.write(RespWriter.write(new Reply.Error("ERR " + e.message())));
                         out.flush();
-                        return; // exits run() → socket closes
+                        return; // exits run() -> socket closes
                     }
                 }
             }
         } catch (IOException e) {
-            // Client disconnected or socket error — nothing actionable.
+            // Client disconnected or socket error
             // The socket is already closed by try-with-resources; this thread ends.
             // Log here if debugging: System.err.println("client gone: " + e.getMessage());
         }

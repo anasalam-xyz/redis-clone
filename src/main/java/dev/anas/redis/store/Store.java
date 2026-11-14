@@ -47,4 +47,55 @@ public final class Store {
     public boolean exists(byte[] key) {
         return get(key) != null; // to wire in expiration logic, calling get()
     }
+
+    public boolean setExpiry(byte[] key, long expireAtMillis) {
+        lock.lock();
+        try {
+            Key k = new Key(key);
+            Entry entry = map.get(k);
+            if (entry == null || entry.isExpired(System.currentTimeMillis())) {
+                map.remove(k);
+                return false;
+            }
+
+            map.put(k, new Entry(entry.value(), expireAtMillis));
+            return true;
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    public long getExpiry(byte[] key) {
+        lock.lock();
+        try {
+            Key k = new Key(key);
+            Entry entry = map.get(k);
+            if (entry == null || entry.isExpired(System.currentTimeMillis())) {
+                map.remove(k);
+                return -1L;
+            }
+            return entry.expireAtMillis();
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    public boolean persist(byte[] key) {
+        lock.lock();
+        try {
+            Key k = new Key(key);
+            Entry e = map.get(k);
+            if (e == null || e.isExpired(System.currentTimeMillis())) {
+                map.remove(k);
+                return false;
+            }
+            if (e.expireAtMillis() == 0L)
+                return false; // no TTL to remove
+            
+            map.put(k, new Entry(e.value(), 0L));
+            return true;
+        } finally {
+            lock.unlock();
+        }
+    }
 }

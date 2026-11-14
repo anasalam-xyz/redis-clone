@@ -17,6 +17,11 @@ public final class Main {
         dispatcher.register("get", new GetCommand(store));
         dispatcher.register("del", new DelCommand(store));
         dispatcher.register("exists", new ExistsCommand(store));
+        dispatcher.register("expire", new ExpireCommand(store));
+        dispatcher.register("pexpire", new PexpireCommand(store));
+        dispatcher.register("ttl", new TtlCommand(store));
+        dispatcher.register("pttl", new PttlCommand(store));
+        dispatcher.register("persist", new PersistCommand(store));
 
         new Server(port, dispatcher).start();
     }
