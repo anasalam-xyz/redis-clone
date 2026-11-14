@@ -122,4 +122,44 @@ class StoreTest {
         Store s = new Store();
         assertFalse(s.persist(bytes("k")));
     }
+
+    @Test
+    void sweepRemovesExpiredKeys() {
+        Store s = new Store();
+        s.set(bytes("live"), bytes("v"), 0L); // no TTL
+        s.set(bytes("dead"), bytes("v"), System.currentTimeMillis() + 50); // expires in 50ms
+
+        try {
+            Thread.sleep(100);
+        } catch (InterruptedException e) {
+            
+        } // wait past expiry
+        int swept = s.sweepExpired();
+
+        assertEquals(1, swept);
+        assertNotNull(s.get(bytes("live"))); // untouched
+        assertNull(s.get(bytes("dead"))); // removed
+    }
+
+    @Test
+    void sweepWithNoExpiredKeysReturnsZero() {
+        Store s = new Store();
+        s.set(bytes("live"), bytes("v"), 0L);
+        assertEquals(0, s.sweepExpired());
+        assertNotNull(s.get(bytes("live")));
+    }
+
+    @Test
+    void sweepRemovesMultipleExpiredKeysInOnePass() {
+        Store s = new Store();
+        for (int i = 0; i < 5; i++) {
+            s.set(bytes("k" + i), bytes("v"), System.currentTimeMillis() + 50);
+        }
+        try {
+            Thread.sleep(100);
+        } catch (InterruptedException e) {
+            
+        }
+        assertEquals(5, s.sweepExpired());
+    }
 }

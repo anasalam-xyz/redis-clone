@@ -91,9 +91,21 @@ public final class Store {
             }
             if (e.expireAtMillis() == 0L)
                 return false; // no TTL to remove
-            
+
             map.put(k, new Entry(e.value(), 0L));
             return true;
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    public int sweepExpired() {
+        lock.lock();
+        try {
+            long now = System.currentTimeMillis();
+            int count = map.size();
+            map.entrySet().removeIf(e -> e.getValue().isExpired(now));
+            return count - map.size();
         } finally {
             lock.unlock();
         }

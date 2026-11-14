@@ -3,6 +3,7 @@ package dev.anas.redis;
 import dev.anas.redis.command.Dispatcher;
 import dev.anas.redis.command.handlers.*;
 import dev.anas.redis.server.Server;
+import dev.anas.redis.store.ExpirySweeper;
 import dev.anas.redis.store.Store;
 
 public final class Main {
@@ -23,6 +24,9 @@ public final class Main {
         dispatcher.register("pttl", new PttlCommand(store));
         dispatcher.register("persist", new PersistCommand(store));
 
+        ExpirySweeper sweeper = new ExpirySweeper(store, 100);
+        sweeper.start();
+        
         new Server(port, dispatcher).start();
     }
 }
