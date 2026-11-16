@@ -28,6 +28,12 @@ public final class Main {
         dispatcher.register("incrby", new IncrByCommand(store));
         dispatcher.register("append", new AppendCommand(store));
         dispatcher.register("strlen", new StrlenCommand(store));
+        dispatcher.register("lpush", new LpushCommand(store));
+        dispatcher.register("rpush", new RpushCommand(store));
+        dispatcher.register("lpop", new LpopCommand(store));
+        dispatcher.register("rpop", new RpopCommand(store));
+        dispatcher.register("llen", new LlenCommand(store));
+        dispatcher.register("lrange", new LrangeCommand(store));
 
         ExpirySweeper sweeper = new ExpirySweeper(store, 100);
         sweeper.start();
