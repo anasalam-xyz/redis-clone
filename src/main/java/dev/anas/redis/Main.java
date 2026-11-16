@@ -23,10 +23,15 @@ public final class Main {
         dispatcher.register("ttl", new TtlCommand(store));
         dispatcher.register("pttl", new PttlCommand(store));
         dispatcher.register("persist", new PersistCommand(store));
+        dispatcher.register("incr", new IncrCommand(store));
+        dispatcher.register("decr", new DecrCommand(store));
+        dispatcher.register("incrby", new IncrByCommand(store));
+        dispatcher.register("append", new AppendCommand(store));
+        dispatcher.register("strlen", new StrlenCommand(store));
 
         ExpirySweeper sweeper = new ExpirySweeper(store, 100);
         sweeper.start();
-        
+
         new Server(port, dispatcher).start();
     }
 }

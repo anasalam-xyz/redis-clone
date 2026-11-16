@@ -110,4 +110,18 @@ public final class Store {
             lock.unlock();
         }
     }
+
+    public void setKeepTtl(byte[] key, Value value) {
+        lock.lock();
+        try {
+            Key k = new Key(key);
+            Entry e = map.get(k);
+            long ttl = (e != null && !e.isExpired(System.currentTimeMillis()))
+                    ? e.expireAtMillis()
+                    : 0L;
+            map.put(k, new Entry(value, ttl));
+        } finally {
+            lock.unlock();
+        }
+    }
 }
