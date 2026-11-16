@@ -8,7 +8,7 @@ public final class Store {
     private final Map<Key, Entry> map = new HashMap<>();
     private final ReentrantLock lock = new ReentrantLock();
 
-    public byte[] get(byte[] key) {
+    public Value get(byte[] key) {
         lock.lock();
         try {
             Key k = new Key(key);
@@ -26,7 +26,7 @@ public final class Store {
         }
     }
 
-    public void set(byte[] key, byte[] value, long expireAtMillis) {
+    public void set(byte[] key, Value value, long expireAtMillis) {
         lock.lock();
         try {
             map.put(new Key(key), new Entry(value, expireAtMillis));

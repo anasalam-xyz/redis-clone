@@ -12,11 +12,19 @@ class StoreTest {
         return s.getBytes(StandardCharsets.US_ASCII);
     }
 
+    private static Value.StringValue sv(String s) {
+        return new Value.StringValue(bytes(s));
+    }
+
+    private static byte[] bytesOf(Value v) {
+        return ((Value.StringValue) v).bytes();
+    }
+
     @Test
     void setThenGetReturnsValue() {
         Store s = new Store();
-        s.set(bytes("name"), bytes("anas"), 0L);
-        assertArrayEquals(bytes("anas"), s.get(bytes("name")));
+        s.set(bytes("name"), sv("anas"), 0L);
+        assertArrayEquals(bytes("anas"), bytesOf(s.get(bytes("name"))));
     }
 
     @Test
@@ -28,15 +36,15 @@ class StoreTest {
     @Test
     void overwriteReplacesValue() {
         Store s = new Store();
-        s.set(bytes("k"), bytes("old"), 0L);
-        s.set(bytes("k"), bytes("new"), 0L);
-        assertArrayEquals(bytes("new"), s.get(bytes("k")));
+        s.set(bytes("k"), sv("old"), 0L);
+        s.set(bytes("k"), sv("new"), 0L);
+        assertArrayEquals(bytes("new"), bytesOf(s.get(bytes("k"))));
     }
 
     @Test
     void delReturnsTrueThenFalse() {
         Store s = new Store();
-        s.set(bytes("k"), bytes("v"), 0L);
+        s.set(bytes("k"), sv("v"), 0L);
         assertTrue(s.del(bytes("k")));
         assertFalse(s.del(bytes("k")));
         assertNull(s.get(bytes("k")));
@@ -46,7 +54,7 @@ class StoreTest {
     void existsReflectsPresence() {
         Store s = new Store();
         assertFalse(s.exists(bytes("k")));
-        s.set(bytes("k"), bytes("v"), 0L);
+        s.set(bytes("k"), sv("v"), 0L);
         assertTrue(s.exists(bytes("k")));
         s.del(bytes("k"));
         assertFalse(s.exists(bytes("k")));
@@ -55,20 +63,20 @@ class StoreTest {
     @Test
     void expiredKeyIsInvisibleToGetAndExists() throws InterruptedException {
         Store s = new Store();
-        s.set(bytes("k"), bytes("v"), System.currentTimeMillis() + 50);
-        assertNotNull(s.get(bytes("k"))); // before expiry
+        s.set(bytes("k"), sv("v"), System.currentTimeMillis() + 50);
+        assertNotNull(s.get(bytes("k")));
         Thread.sleep(100);
-        assertNull(s.get(bytes("k"))); // after expiry — lazy deletion
-        assertFalse(s.exists(bytes("k"))); // exists respects expiry
+        assertNull(s.get(bytes("k")));
+        assertFalse(s.exists(bytes("k")));
     }
 
     @Test
     void binaryKeyAndValueRoundTrip() {
         Store s = new Store();
-        byte[] key = { 'k', 0x00, (byte) 0xFF, '\r', '\n' };
-        byte[] value = { 0x00, (byte) 0x80, (byte) 0xFF, 'x' };
-        s.set(key, value, 0L);
-        assertArrayEquals(value, s.get(key));
+        byte[] key   = {'k', 0x00, (byte) 0xFF, '\r', '\n'};
+        byte[] value = {0x00, (byte) 0x80, (byte) 0xFF, 'x'};
+        s.set(key, new Value.StringValue(value), 0L);
+        assertArrayEquals(value, bytesOf(s.get(key)));
     }
 
     @Test
@@ -80,7 +88,7 @@ class StoreTest {
     @Test
     void setExpiryOnExistingKeyStoresTtl() {
         Store s = new Store();
-        s.set(bytes("k"), bytes("v"), 0L);
+        s.set(bytes("k"), sv("v"), 0L);
         long at = System.currentTimeMillis() + 10_000;
 
         assertTrue(s.setExpiry(bytes("k"), at));
@@ -96,14 +104,14 @@ class StoreTest {
     @Test
     void getExpiryReturnsZeroForNoTtl() {
         Store s = new Store();
-        s.set(bytes("k"), bytes("v"), 0L);
+        s.set(bytes("k"), sv("v"), 0L);
         assertEquals(0L, s.getExpiry(bytes("k")));
     }
 
     @Test
     void persistRemovesTtl() {
         Store s = new Store();
-        s.set(bytes("k"), bytes("v"), 0L);
+        s.set(bytes("k"), sv("v"), 0L);
         s.setExpiry(bytes("k"), System.currentTimeMillis() + 10_000);
 
         assertTrue(s.persist(bytes("k")));
@@ -113,7 +121,7 @@ class StoreTest {
     @Test
     void persistOnKeyWithoutTtlReturnsFalse() {
         Store s = new Store();
-        s.set(bytes("k"), bytes("v"), 0L);
+        s.set(bytes("k"), sv("v"), 0L);
         assertFalse(s.persist(bytes("k")));
     }
 
@@ -124,42 +132,34 @@ class StoreTest {
     }
 
     @Test
-    void sweepRemovesExpiredKeys() {
+    void sweepRemovesExpiredKeys() throws InterruptedException {
         Store s = new Store();
-        s.set(bytes("live"), bytes("v"), 0L); // no TTL
-        s.set(bytes("dead"), bytes("v"), System.currentTimeMillis() + 50); // expires in 50ms
+        s.set(bytes("live"), sv("v"), 0L);
+        s.set(bytes("dead"), sv("v"), System.currentTimeMillis() + 50);
 
-        try {
-            Thread.sleep(100);
-        } catch (InterruptedException e) {
-            
-        } // wait past expiry
+        Thread.sleep(100);
         int swept = s.sweepExpired();
 
         assertEquals(1, swept);
-        assertNotNull(s.get(bytes("live"))); // untouched
-        assertNull(s.get(bytes("dead"))); // removed
+        assertNotNull(s.get(bytes("live")));
+        assertNull(s.get(bytes("dead")));
     }
 
     @Test
     void sweepWithNoExpiredKeysReturnsZero() {
         Store s = new Store();
-        s.set(bytes("live"), bytes("v"), 0L);
+        s.set(bytes("live"), sv("v"), 0L);
         assertEquals(0, s.sweepExpired());
         assertNotNull(s.get(bytes("live")));
     }
 
     @Test
-    void sweepRemovesMultipleExpiredKeysInOnePass() {
+    void sweepRemovesMultipleExpiredKeysInOnePass() throws InterruptedException {
         Store s = new Store();
         for (int i = 0; i < 5; i++) {
-            s.set(bytes("k" + i), bytes("v"), System.currentTimeMillis() + 50);
+            s.set(bytes("k" + i), sv("v"), System.currentTimeMillis() + 50);
         }
-        try {
-            Thread.sleep(100);
-        } catch (InterruptedException e) {
-            
-        }
+        Thread.sleep(100);
         assertEquals(5, s.sweepExpired());
     }
 }

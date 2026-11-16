@@ -2,6 +2,7 @@ package dev.anas.redis.command.handlers;
 
 import dev.anas.redis.protocol.Reply;
 import dev.anas.redis.store.Store;
+import dev.anas.redis.store.Value;
 import org.junit.jupiter.api.Test;
 
 import java.nio.charset.StandardCharsets;
@@ -25,7 +26,7 @@ class PttlCommandTest {
     @Test
     void returnsMinusOneForKeyWithoutTtl() {
         Store store = new Store();
-        store.set(bytes("k"), bytes("v"), 0L);
+        store.set(bytes("k"), new Value.StringValue(bytes("v")), 0L);
         PttlCommand cmd = new PttlCommand(store);
         Reply r = cmd.execute(new byte[][]{bytes("k")});
         assertInstanceOf(Reply.Integer.class, r);
@@ -35,7 +36,7 @@ class PttlCommandTest {
     @Test
     void returnsRemainingMillis() {
         Store store = new Store();
-        store.set(bytes("k"), bytes("v"), 0L);
+        store.set(bytes("k"), new Value.StringValue(bytes("v")), 0L);
         store.setExpiry(bytes("k"), System.currentTimeMillis() + 5000);
         PttlCommand cmd = new PttlCommand(store);
         Reply r = cmd.execute(new byte[][]{bytes("k")});

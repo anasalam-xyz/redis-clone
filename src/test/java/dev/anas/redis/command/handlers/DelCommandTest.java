@@ -2,6 +2,7 @@ package dev.anas.redis.command.handlers;
 
 import dev.anas.redis.protocol.Reply;
 import dev.anas.redis.store.Store;
+import dev.anas.redis.store.Value;
 import org.junit.jupiter.api.Test;
 
 import java.nio.charset.StandardCharsets;
@@ -14,10 +15,14 @@ class DelCommandTest {
         return s.getBytes(StandardCharsets.US_ASCII);
     }
 
+    private static Value.StringValue sv(String s) {
+        return new Value.StringValue(bytes(s));
+    }
+
     @Test
     void returnsOneWhenKeyDeleted() {
         Store store = new Store();
-        store.set(bytes("k"), bytes("v"), 0L);
+        store.set(bytes("k"), sv("v"), 0L);
         DelCommand cmd = new DelCommand(store);
 
         Reply r = cmd.execute(new byte[][]{bytes("k")});

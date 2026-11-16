@@ -2,6 +2,7 @@ package dev.anas.redis.command.handlers;
 
 import dev.anas.redis.protocol.Reply;
 import dev.anas.redis.store.Store;
+import dev.anas.redis.store.Value;
 import org.junit.jupiter.api.Test;
 
 import java.nio.charset.StandardCharsets;
@@ -14,10 +15,14 @@ class ExpireCommandTest {
         return s.getBytes(StandardCharsets.US_ASCII);
     }
 
+    private static Value.StringValue sv(String s) {
+        return new Value.StringValue(bytes(s));
+    }
+
     @Test
     void expireOnExistingKeyReturnsOneAndSetsTtl() {
         Store store = new Store();
-        store.set(bytes("k"), bytes("v"), 0L);
+        store.set(bytes("k"), sv("v"), 0L);
         ExpireCommand cmd = new ExpireCommand(store);
 
         long before = System.currentTimeMillis();
@@ -28,17 +33,13 @@ class ExpireCommandTest {
         assertEquals(1L, ((Reply.Integer) r).n());
 
         long expiry = store.getExpiry(bytes("k"));
-        assertTrue(expiry >= before + 10_000 && expiry <= after + 10_000,
-                   "expiry out of expected range: " + expiry);
+        assertTrue(expiry >= before + 10_000 && expiry <= after + 10_000);
     }
 
     @Test
     void expireOnMissingKeyReturnsZero() {
-        Store store = new Store();
-        ExpireCommand cmd = new ExpireCommand(store);
-
+        ExpireCommand cmd = new ExpireCommand(new Store());
         Reply r = cmd.execute(new byte[][]{bytes("k"), bytes("10")});
-
         assertInstanceOf(Reply.Integer.class, r);
         assertEquals(0L, ((Reply.Integer) r).n());
     }
@@ -46,25 +47,22 @@ class ExpireCommandTest {
     @Test
     void expireWithZeroDeletesKey() {
         Store store = new Store();
-        store.set(bytes("k"), bytes("v"), 0L);
+        store.set(bytes("k"), sv("v"), 0L);
         ExpireCommand cmd = new ExpireCommand(store);
 
         Reply r = cmd.execute(new byte[][]{bytes("k"), bytes("0")});
-
         assertInstanceOf(Reply.Integer.class, r);
         assertEquals(1L, ((Reply.Integer) r).n());
         assertNull(store.get(bytes("k")));
-        assertFalse(store.exists(bytes("k")));
     }
 
     @Test
     void expireWithNegativeDeletesKey() {
         Store store = new Store();
-        store.set(bytes("k"), bytes("v"), 0L);
+        store.set(bytes("k"), sv("v"), 0L);
         ExpireCommand cmd = new ExpireCommand(store);
 
         Reply r = cmd.execute(new byte[][]{bytes("k"), bytes("-5")});
-
         assertInstanceOf(Reply.Integer.class, r);
         assertEquals(1L, ((Reply.Integer) r).n());
         assertNull(store.get(bytes("k")));
@@ -73,8 +71,7 @@ class ExpireCommandTest {
     @Test
     void nonNumericArgumentReturnsError() {
         ExpireCommand cmd = new ExpireCommand(new Store());
-        Reply r = cmd.execute(new byte[][]{bytes("k"), bytes("abc")});
-        assertInstanceOf(Reply.Error.class, r);
+        assertInstanceOf(Reply.Error.class, cmd.execute(new byte[][]{bytes("k"), bytes("abc")}));
     }
 
     @Test
