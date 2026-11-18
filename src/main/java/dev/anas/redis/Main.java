@@ -34,6 +34,11 @@ public final class Main {
         dispatcher.register("rpop", new RpopCommand(store));
         dispatcher.register("llen", new LlenCommand(store));
         dispatcher.register("lrange", new LrangeCommand(store));
+        dispatcher.register("hset", new HsetCommand(store));
+        dispatcher.register("hget", new HgetCommand(store));
+        dispatcher.register("hdel", new HdelCommand(store));
+        dispatcher.register("hgetall", new HgetallCommand(store));
+        dispatcher.register("hexists", new HexistsCommand(store));
 
         ExpirySweeper sweeper = new ExpirySweeper(store, 100);
         sweeper.start();
