@@ -113,4 +113,53 @@ class RespWriterTest {
         byte[] trailer = Arrays.copyOfRange(out, 4 + data.length, out.length);
         assertArrayEquals(bytes("\r\n"), trailer);
     }
+
+    @Test
+    void writeArrayOfBulkStringsProducesCorrectBytes() {
+        byte[][] args = {
+                { 's', 'e', 't' },
+                { 'k' },
+                { 'v' }
+        };
+        byte[] expected = bytes("*3\r\n$3\r\nset\r\n$1\r\nk\r\n$1\r\nv\r\n");
+        assertArrayEquals(expected, RespWriter.writeArrayOfBulkStrings(args));
+    }
+
+    @Test
+    void writeArrayOfBulkStringsHandlesBinary() {
+        byte[][] args = {
+                { 's', 'e', 't' },
+                { 'k' },
+                { 0x00, (byte) 0xFF, '\r', '\n' }
+        };
+        byte[] out = RespWriter.writeArrayOfBulkStrings(args);
+        // Header: *3\r\n$3\r\nset\r\n$1\r\nk\r\n$4\r\n
+        byte[] expectedHeader = bytes("*3\r\n$3\r\nset\r\n$1\r\nk\r\n$4\r\n");
+        assertArrayEquals(expectedHeader,
+                java.util.Arrays.copyOfRange(out, 0, expectedHeader.length));
+        // Payload: the 4 binary bytes
+        byte[] payload = java.util.Arrays.copyOfRange(out, expectedHeader.length,
+                expectedHeader.length + 4);
+        assertArrayEquals(new byte[] { 0x00, (byte) 0xFF, '\r', '\n' }, payload);
+    }
+
+    @Test
+    void writeArrayOfBulkStringsRoundTripsThroughParser() {
+        byte[][] args = {
+                { 's', 'e', 't' },
+                { 'n', 'a', 'm', 'e' },
+                { 'a', 'n', 'a', 's' }
+        };
+        byte[] encoded = RespWriter.writeArrayOfBulkStrings(args);
+
+        RespParser parser = new RespParser();
+        ParseResult r = parser.feed(encoded);
+        assertInstanceOf(ParseResult.Parsed.class, r);
+        byte[][] decoded = ((ParseResult.Parsed) r).args();
+
+        assertEquals(args.length, decoded.length);
+        for (int i = 0; i < args.length; i++) {
+            assertArrayEquals(args[i], decoded[i]);
+        }
+    }
 }

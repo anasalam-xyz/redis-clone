@@ -1,7 +1,11 @@
 package dev.anas.redis;
 
+import java.io.IOException;
+
 import dev.anas.redis.command.Dispatcher;
 import dev.anas.redis.command.handlers.*;
+import dev.anas.redis.persistence.AofLoader;
+import dev.anas.redis.persistence.AofWriter;
 import dev.anas.redis.server.Server;
 import dev.anas.redis.store.ExpirySweeper;
 import dev.anas.redis.store.Store;
@@ -11,7 +15,9 @@ public final class Main {
         int port = 6380;
 
         Store store = new Store();
-        Dispatcher dispatcher = new Dispatcher();
+        AofWriter aof = new AofWriter("appendonly.aof");
+        Dispatcher dispatcher = new Dispatcher(aof);
+
         dispatcher.register("ping", new PingCommand());
         dispatcher.register("echo", new EchoCommand());
         dispatcher.register("set", new SetCommand(store));
@@ -42,6 +48,15 @@ public final class Main {
 
         ExpirySweeper sweeper = new ExpirySweeper(store, 100);
         sweeper.start();
+
+        AofLoader.replay("appendonly.aof", dispatcher);
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            try {
+                aof.close();
+            } catch (IOException ignored) {
+                // During JVM shutdown, close failure has nowhere to report. The process is exiting.
+            }
+        }));
 
         new Server(port, dispatcher).start();
     }
