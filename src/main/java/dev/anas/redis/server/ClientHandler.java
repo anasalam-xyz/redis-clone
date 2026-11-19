@@ -18,6 +18,11 @@ public final class ClientHandler implements Runnable {
     public ClientHandler(Socket socket, Dispatcher dispatcher) {
         this.socket = socket;
         this.dispatcher = dispatcher;
+        try {
+            socket.setTcpNoDelay(true);
+        } catch (java.net.SocketException e) {
+            // ignore — Nagle stays on, minor latency cost
+        }
     }
 
     @Override
@@ -30,12 +35,13 @@ public final class ClientHandler implements Runnable {
             int n;
             while ((n = in.read(chunk)) != -1) {
                 ParseResult r = parser.feed(Arrays.copyOf(chunk, n));
+                boolean needFlush = false;
 
                 while (true) {
                     if (r instanceof ParseResult.Parsed p) {
                         Reply reply = dispatcher.dispatch(p.args());
                         out.write(RespWriter.write(reply));
-                        out.flush();
+                        needFlush = true;
                         r = parser.feed(new byte[0]);
                     } else if (r instanceof ParseResult.NeedMore) {
                         break; // back to read()
@@ -44,6 +50,10 @@ public final class ClientHandler implements Runnable {
                         out.flush();
                         return; // exits run() -> socket closes
                     }
+                }
+
+                if (needFlush) {
+                    out.flush(); // one flush per batch of pipelined commands
                 }
             }
         } catch (IOException e) {
