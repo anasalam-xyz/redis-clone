@@ -47,19 +47,6 @@ public final class RespWriter {
         }
     }
 
-    public static byte[] writeArrayOfBulkStrings(byte[][] args) {
-        ByteArrayOutputStream out = new ByteArrayOutputStream();
-        out.writeBytes(ascii("*" + args.length + "\r\n"));
-
-        for(byte[] arg: args) {
-            out.writeBytes(ascii("$" + arg.length + "\r\n"));
-            out.writeBytes(arg);
-            out.writeBytes(ascii("\r\n"));
-        }
-
-        return out.toByteArray();
-    }
-
     private static byte[] ascii(String s) {
         // Encode as ASCII.
         // Non-ASCII chars are replaced with '?' — per RESP,

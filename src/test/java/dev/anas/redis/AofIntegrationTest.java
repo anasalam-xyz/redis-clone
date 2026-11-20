@@ -15,6 +15,7 @@ import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -25,7 +26,9 @@ class AofIntegrationTest {
     }
 
     private static int freePort() throws IOException {
-        try (ServerSocket s = new ServerSocket(0)) { return s.getLocalPort(); }
+        try (ServerSocket s = new ServerSocket(0)) {
+            return s.getLocalPort();
+        }
     }
 
     private static Dispatcher buildDispatcher(Store store, AofWriter aof) {
@@ -38,8 +41,11 @@ class AofIntegrationTest {
     private static void waitForPort(int port, long ms) throws Exception {
         long deadline = System.currentTimeMillis() + ms;
         while (System.currentTimeMillis() < deadline) {
-            try (Socket probe = new Socket("localhost", port)) { return; }
-            catch (IOException e) { Thread.sleep(20); }
+            try (Socket probe = new Socket("localhost", port)) {
+                return;
+            } catch (IOException e) {
+                Thread.sleep(20);
+            }
         }
         throw new IllegalStateException("server didn't start");
     }
@@ -54,7 +60,10 @@ class AofIntegrationTest {
         AofWriter aof1 = new AofWriter(aofPath.toString());
         Dispatcher d1 = buildDispatcher(store1, aof1);
         Thread t1 = new Thread(() -> {
-            try { new Server(port, d1).start(); } catch (IOException ignored) {}
+            try {
+                new Server(port, d1, Map.of()).start();
+            } catch (IOException ignored) {
+            }
         });
         t1.setDaemon(true);
         t1.start();
@@ -63,7 +72,7 @@ class AofIntegrationTest {
         try (Socket s = new Socket("localhost", port)) {
             s.getOutputStream().write(bytes("*3\r\n$3\r\nset\r\n$1\r\nk\r\n$1\r\nv\r\n"));
             s.getOutputStream().flush();
-            s.getInputStream().read();   // read +OK
+            s.getInputStream().read(); // read +OK
         }
         aof1.close();
 
@@ -79,12 +88,12 @@ class AofIntegrationTest {
 
         // Data survived
         assertArrayEquals(bytes("v"),
-            ((dev.anas.redis.store.Value.StringValue) store2.get(bytes("k"))).bytes());
+                ((dev.anas.redis.store.Value.StringValue) store2.get(bytes("k"))).bytes());
 
         // AOF did NOT grow during replay
         long sizeAfterReplay = Files.size(aofPath);
         assertEquals(sizeAfterFirstRun, sizeAfterReplay,
-            "AOF should not grow during replay — dispatchWithoutAof must be used");
+                "AOF should not grow during replay — dispatchWithoutAof must be used");
 
         aof2.close();
     }

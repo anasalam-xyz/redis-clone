@@ -19,6 +19,7 @@ import java.io.OutputStream;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -42,7 +43,7 @@ class ServerIntegrationTest {
         dispatcher.register("del",    new DelCommand(store));
         dispatcher.register("exists", new ExistsCommand(store));
 
-        Server server = new Server(port, dispatcher);
+        Server server = new Server(port, dispatcher, Map.of());
         Thread t = new Thread(() -> {
             try { server.start(); } catch (IOException ignored) {}
         });

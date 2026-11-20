@@ -1,12 +1,15 @@
 package dev.anas.redis.persistence;
 
 import dev.anas.redis.protocol.RespWriter;
+import dev.anas.redis.protocol.Reply;
 
 import java.io.BufferedOutputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
+import java.util.ArrayList;
 
 public final class AofWriter implements AutoCloseable {
 
@@ -41,7 +44,13 @@ public final class AofWriter implements AutoCloseable {
     }
 
     public synchronized void append(byte[][] args) throws IOException {
-        buf.write(RespWriter.writeArrayOfBulkStrings(args));
+        List<Reply> list = new ArrayList<>();
+
+        for(byte[] arg: args) {
+            list.add(new Reply.BulkString(arg));
+        }
+        
+        buf.write(RespWriter.write(new Reply.Array(list)));
     }
 
     public synchronized void fsync() throws IOException {

@@ -1,14 +1,20 @@
 package dev.anas.redis;
 
 import java.io.IOException;
+import java.util.Map;
 
 import dev.anas.redis.command.Dispatcher;
 import dev.anas.redis.command.handlers.*;
 import dev.anas.redis.persistence.AofLoader;
 import dev.anas.redis.persistence.AofWriter;
+import dev.anas.redis.pubsub.Broker;
+import dev.anas.redis.pubsub.handlers.PublishCommand;
+import dev.anas.redis.pubsub.handlers.SubscribeCommand;
+import dev.anas.redis.pubsub.handlers.UnsubscribeCommand;
 import dev.anas.redis.server.Server;
 import dev.anas.redis.store.ExpirySweeper;
 import dev.anas.redis.store.Store;
+import dev.anas.redis.pubsub.Command;
 
 public final class Main {
     public static void main(String[] args) throws Exception {
@@ -54,10 +60,16 @@ public final class Main {
             try {
                 aof.close();
             } catch (IOException ignored) {
-                // During JVM shutdown, close failure has nowhere to report. The process is exiting.
+                // During JVM shutdown, close failure has nowhere to report. The process is
+                // exiting.
             }
         }));
 
-        new Server(port, dispatcher).start();
+        Broker broker = new Broker();
+        Map<String, Command> pubsub = Map.of(
+                "subscribe", new SubscribeCommand(broker),
+                "unsubscribe", new UnsubscribeCommand(broker),
+                "publish", new PublishCommand(broker));
+        new Server(port, dispatcher, pubsub).start();
     }
 }

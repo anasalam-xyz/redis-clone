@@ -1,27 +1,44 @@
 package dev.anas.redis.server;
 
 import dev.anas.redis.protocol.*;
+import dev.anas.redis.pubsub.Broker;
 import dev.anas.redis.command.Dispatcher;
+import dev.anas.redis.store.Key;
+import dev.anas.redis.pubsub.handlers.*;
+import dev.anas.redis.pubsub.Command;
+
 import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.Socket;
+import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Locale;
 
 public final class ClientHandler implements Runnable {
     private final Socket socket;
     private final Dispatcher dispatcher;
+    private final Map<String, Command> pubsubCommands;
     private final RespParser parser = new RespParser();
+    private final Set<Key> subscribedChannels = ConcurrentHashMap.newKeySet();
+    private boolean subscribedMode = false;
+    private OutputStream out;
 
-    public ClientHandler(Socket socket, Dispatcher dispatcher) {
+    public ClientHandler(Socket socket, Dispatcher dispatcher, Map<String, Command> pubsubCommands) {
         this.socket = socket;
         this.dispatcher = dispatcher;
-        try {
-            socket.setTcpNoDelay(true);
-        } catch (java.net.SocketException e) {
-            // ignore — Nagle stays on, minor latency cost
+        this.pubsubCommands = pubsubCommands;
+        if (socket != null) {
+            try {
+                socket.setTcpNoDelay(true);
+            } catch (java.net.SocketException ignored) {
+            }
         }
     }
 
@@ -30,7 +47,7 @@ public final class ClientHandler implements Runnable {
         try (socket;
                 InputStream in = new BufferedInputStream(socket.getInputStream());
                 OutputStream out = new BufferedOutputStream(socket.getOutputStream())) {
-
+            this.out = out;
             byte[] chunk = new byte[8192];
             int n;
             while ((n = in.read(chunk)) != -1) {
@@ -39,27 +56,74 @@ public final class ClientHandler implements Runnable {
 
                 while (true) {
                     if (r instanceof ParseResult.Parsed p) {
-                        Reply reply = dispatcher.dispatch(p.args());
-                        out.write(RespWriter.write(reply));
-                        needFlush = true;
+                        String name = new String(p.args()[0], StandardCharsets.US_ASCII).toLowerCase(Locale.ROOT);
+                        Command pubsubCmd = pubsubCommands.get(name);
+                        if (pubsubCmd != null) {
+                            pubsubCmd.execute(p.args(), this); // writes directly
+                        } else if (subscribedMode && !name.equals("ping") && !name.equals("quit")) {
+                            writeReply(new Reply.Error("ERR Can't execute '" + name
+                                    + "': only (P)SUBSCRIBE / (P)UNSUBSCRIBE / PING / QUIT allowed in this context"));
+                        } else {
+                            Reply reply = dispatcher.dispatch(p.args());
+                            synchronized (this) {
+                                out.write(RespWriter.write(reply));
+                            }
+                            needFlush = true;
+                        }
                         r = parser.feed(new byte[0]);
                     } else if (r instanceof ParseResult.NeedMore) {
-                        break; // back to read()
+                        break;
                     } else if (r instanceof ParseResult.ParseError e) {
-                        out.write(RespWriter.write(new Reply.Error("ERR " + e.message())));
-                        out.flush();
-                        return; // exits run() -> socket closes
+                        writeReply(new Reply.Error("ERR " + e.message()));
+                        return;
                     }
                 }
 
                 if (needFlush) {
-                    out.flush(); // one flush per batch of pipelined commands
+                    synchronized (this) {
+                        out.flush();
+                    }
                 }
             }
-        } catch (IOException e) {
-            // Client disconnected or socket error
-            // The socket is already closed by try-with-resources; this thread ends.
-            // Log here if debugging: System.err.println("client gone: " + e.getMessage());
+        } catch (IOException ignored) {
         }
+    }
+
+    public synchronized void sendPubSubMessage(byte[] channel, byte[] message) {
+        try {
+            out.write(RespWriter.write(new Reply.Array(List.of(
+                    new Reply.BulkString("message".getBytes(StandardCharsets.US_ASCII)),
+                    new Reply.BulkString(channel),
+                    new Reply.BulkString(message)))));
+            out.flush();
+        } catch (IOException ignored) {
+            // subscriber disconnected
+        }
+    }
+
+    public synchronized void writeReply(Reply reply) throws IOException {
+        out.write(RespWriter.write(reply));
+        out.flush();
+    }
+
+    public void addSubscription(Key channel) {
+        subscribedChannels.add(channel);
+        subscribedMode = true;
+    }
+
+    public void removeSubscription(Key channel) {
+        subscribedChannels.remove(channel);
+        if (subscribedChannels.isEmpty()) {
+            subscribedMode = false;
+        }
+    }
+
+    public void clearSubscriptions() {
+        subscribedChannels.clear();
+        subscribedMode = false;
+    }
+
+    public boolean isSubscribedMode() {
+        return subscribedMode;
     }
 }
