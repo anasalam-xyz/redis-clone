@@ -1,20 +1,16 @@
 package dev.anas.redis.server;
 
 import dev.anas.redis.protocol.*;
-import dev.anas.redis.pubsub.Broker;
 import dev.anas.redis.command.Dispatcher;
 import dev.anas.redis.store.Key;
-import dev.anas.redis.pubsub.handlers.*;
 import dev.anas.redis.pubsub.Command;
 
-import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
-import java.util.Arrays;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.List;
@@ -45,37 +41,39 @@ public final class ClientHandler implements Runnable {
     @Override
     public void run() {
         try (socket;
-                InputStream in = new BufferedInputStream(socket.getInputStream());
+                InputStream in = socket.getInputStream();
                 OutputStream out = new BufferedOutputStream(socket.getOutputStream())) {
             this.out = out;
             byte[] chunk = new byte[8192];
             int n;
             while ((n = in.read(chunk)) != -1) {
-                ParseResult r = parser.feed(Arrays.copyOf(chunk, n));
+                parser.append(chunk, 0, n);
                 boolean needFlush = false;
 
                 while (true) {
-                    if (r instanceof ParseResult.Parsed p) {
-                        String name = new String(p.args()[0], StandardCharsets.US_ASCII).toLowerCase(Locale.ROOT);
-                        Command pubsubCmd = pubsubCommands.get(name);
-                        if (pubsubCmd != null) {
-                            pubsubCmd.execute(p.args(), this); // writes directly
-                        } else if (subscribedMode && !name.equals("ping") && !name.equals("quit")) {
-                            writeReply(new Reply.Error("ERR Can't execute '" + name
-                                    + "': only (P)SUBSCRIBE / (P)UNSUBSCRIBE / PING / QUIT allowed in this context"));
-                        } else {
-                            Reply reply = dispatcher.dispatch(p.args());
-                            synchronized (this) {
-                                out.write(RespWriter.write(reply));
-                            }
-                            needFlush = true;
-                        }
-                        r = parser.feed(new byte[0]);
-                    } else if (r instanceof ParseResult.NeedMore) {
+                    ParseResult r = parser.next();
+                    if (r instanceof ParseResult.NeedMore) {
                         break;
-                    } else if (r instanceof ParseResult.ParseError e) {
+                    }
+                    if (r instanceof ParseResult.ParseError e) {
                         writeReply(new Reply.Error("ERR " + e.message()));
                         return;
+                    }
+                    ParseResult.Parsed p = (ParseResult.Parsed) r;
+
+                    String name = new String(p.args()[0], StandardCharsets.US_ASCII).toLowerCase(Locale.ROOT);
+                    Command pubsubCmd = pubsubCommands.get(name);
+                    if (pubsubCmd != null) {
+                        pubsubCmd.execute(p.args(), this);
+                    } else if (subscribedMode && !name.equals("ping") && !name.equals("quit")) {
+                        writeReply(new Reply.Error("ERR Can't execute '" + name
+                                + "': only (P)SUBSCRIBE / (P)UNSUBSCRIBE / PING / QUIT allowed in this context"));
+                    } else {
+                        Reply reply = dispatcher.dispatch(p.args());
+                        synchronized (this) {
+                            RespWriter.writeTo(out, reply);
+                        }
+                        needFlush = true;
                     }
                 }
 
@@ -91,10 +89,10 @@ public final class ClientHandler implements Runnable {
 
     public synchronized void sendPubSubMessage(byte[] channel, byte[] message) {
         try {
-            out.write(RespWriter.write(new Reply.Array(List.of(
+            RespWriter.writeTo(out, new Reply.Array(List.of(
                     new Reply.BulkString("message".getBytes(StandardCharsets.US_ASCII)),
                     new Reply.BulkString(channel),
-                    new Reply.BulkString(message)))));
+                    new Reply.BulkString(message))));
             out.flush();
         } catch (IOException ignored) {
             // subscriber disconnected
@@ -102,7 +100,7 @@ public final class ClientHandler implements Runnable {
     }
 
     public synchronized void writeReply(Reply reply) throws IOException {
-        out.write(RespWriter.write(reply));
+        RespWriter.writeTo(out, reply);
         out.flush();
     }
 

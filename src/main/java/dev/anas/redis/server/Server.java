@@ -1,7 +1,6 @@
 package dev.anas.redis.server;
 
 import dev.anas.redis.command.Dispatcher;
-import dev.anas.redis.pubsub.Broker;
 import dev.anas.redis.pubsub.Command;
 
 import java.io.IOException;
@@ -21,7 +20,7 @@ public final class Server {
     }
 
     public void start() throws IOException {
-        try (ServerSocket server = new ServerSocket(port)) {
+        try (ServerSocket server = new ServerSocket(port, 1024)) {
             System.out.println("listening on " + port);
             while (true) {
                 Socket client = server.accept();

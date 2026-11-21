@@ -12,23 +12,17 @@ public final class SetCommand implements Command {
         this.store = store;
     }
 
-    @Override 
+    @Override
     public Reply execute(byte[][] args) {
-        if(args.length != 2) {
+        if (args.length != 2) {
             return new Reply.Error("ERR wrong number of arguments for 'set' command");
         }
 
-        Value value = store.get(args[0]);
-        if(value != null && !(value instanceof Value.StringValue)) {
-            return WRONGTYPE;
-        }
-
         store.set(args[0], new Value.StringValue(args[1]), 0L);
-
         return new Reply.SimpleString("OK");
     }
 
-    @Override 
+    @Override
     public boolean isWrite() {
         return true;
     }

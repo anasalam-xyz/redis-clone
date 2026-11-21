@@ -5,6 +5,7 @@ import dev.anas.redis.protocol.ParseResult;
 import dev.anas.redis.protocol.RespParser;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
@@ -15,18 +16,21 @@ public final class AofLoader {
         if (!Files.exists(file))
             return;
 
-        byte[] bytes = Files.readAllBytes(file);
         RespParser parser = new RespParser();
-        ParseResult r = parser.feed(bytes);
-
-        while (r instanceof ParseResult.Parsed p) {
-            dispatcher.dispatchWithoutAof(p.args());
-            r = parser.feed(new byte[0]);
+        byte[] chunk = new byte[64 * 1024];
+        try (InputStream in = Files.newInputStream(file)) {
+            int n;
+            while ((n = in.read(chunk)) != -1) {
+                parser.append(chunk, 0, n);
+                ParseResult r;
+                while ((r = parser.next()) instanceof ParseResult.Parsed p) {
+                    dispatcher.dispatchWithoutAof(p.args());
+                }
+                if (r instanceof ParseResult.ParseError e) {
+                    throw new IOException("Corrupt AOF: " + e.message());
+                }
+            }
         }
-
-        if (r instanceof ParseResult.ParseError e) {
-            throw new IOException("Corrupt AOF: Parse Error " + e.message());
-        }
-        // NeedMore at end = clean finish
+        // leftover bytes = a truncated last command (crash mid-write). so its ignored
     }
 }

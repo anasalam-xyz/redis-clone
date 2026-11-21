@@ -11,16 +11,17 @@ import java.util.concurrent.locks.ReentrantLock;
 
 public final class Store {
     private final ReentrantLock lock = new ReentrantLock();
-    private final Map<Key, Entry> map = new LinkedHashMap<>(16, 0.75f, true);
-    private long maxMemory = 0, currentMemory = 0;
+    private final Map<Key, Entry> map;
+    private final long maxMemory;
+    private long currentMemory = 0;
 
-    public void setMaxMemory(long maxMemory) {
-        lock.lock();
-        try {
-            this.maxMemory = maxMemory;
-        } finally {
-            lock.unlock();
-        }
+    public Store() {
+        this(0);
+    }
+
+    public Store(long maxMemory) {
+        this.maxMemory = maxMemory;
+        this.map = new LinkedHashMap<>(16, 0.75f, maxMemory > 0); // access order only if evicting
     }
 
     private static long sizeOf(Entry entry) {
@@ -29,7 +30,8 @@ public final class Store {
             case Value.StringValue s -> s.bytes().length;
             case Value.ListValue l -> {
                 long sum = 0;
-                for (byte[] e : l.items()) sum += e.length;
+                for (byte[] e : l.items())
+                    sum += e.length;
                 yield sum;
             }
             case Value.HashValue h -> {
@@ -42,7 +44,8 @@ public final class Store {
     }
 
     private void evictIfNeeded() {
-        if (maxMemory <= 0) return;
+        if (maxMemory <= 0)
+            return;
         while (currentMemory > maxMemory && !map.isEmpty()) {
             Map.Entry<Key, Entry> lru = map.entrySet().iterator().next();
             currentMemory -= sizeOf(lru.getValue());
@@ -55,7 +58,8 @@ public final class Store {
         try {
             Key k = new Key(key);
             Entry entry = map.get(k);
-            if (entry == null) return null;
+            if (entry == null)
+                return null;
             if (entry.isExpired(System.currentTimeMillis())) {
                 currentMemory -= sizeOf(entry);
                 map.remove(k);
@@ -72,7 +76,8 @@ public final class Store {
         try {
             Key k = new Key(key);
             Entry old = map.get(k);
-            if (old != null) currentMemory -= sizeOf(old);
+            if (old != null)
+                currentMemory -= sizeOf(old);
             Entry e = new Entry(value, expireAtMillis);
             map.put(k, e);
             currentMemory += sizeOf(e);
@@ -86,7 +91,8 @@ public final class Store {
         lock.lock();
         try {
             Entry e = map.remove(new Key(key));
-            if (e != null) currentMemory -= sizeOf(e);
+            if (e != null)
+                currentMemory -= sizeOf(e);
             return e != null;
         } finally {
             lock.unlock();
@@ -121,7 +127,8 @@ public final class Store {
         try {
             Key k = new Key(key);
             Entry entry = map.get(k);
-            if (entry == null) return -1L;
+            if (entry == null)
+                return -1L;
             if (entry.isExpired(System.currentTimeMillis())) {
                 currentMemory -= sizeOf(entry);
                 map.remove(k);
@@ -142,7 +149,8 @@ public final class Store {
                 map.remove(k);
                 return false;
             }
-            if (old.expireAtMillis() == 0L) return false;
+            if (old.expireAtMillis() == 0L)
+                return false;
             currentMemory -= sizeOf(old);
             Entry e = new Entry(old.value(), 0L);
             map.put(k, e);
@@ -177,7 +185,8 @@ public final class Store {
         try {
             Key k = new Key(key);
             Entry old = map.get(k);
-            if (old != null) currentMemory -= sizeOf(old);
+            if (old != null)
+                currentMemory -= sizeOf(old);
             long ttl = (old != null && !old.isExpired(System.currentTimeMillis()))
                     ? old.expireAtMillis()
                     : 0L;
@@ -199,8 +208,10 @@ public final class Store {
             if (old == null || old.isExpired(System.currentTimeMillis())) {
                 Deque<byte[]> newList = new ArrayDeque<>();
                 for (byte[] element : elements) {
-                    if (left) newList.addFirst(element);
-                    else      newList.addLast(element);
+                    if (left)
+                        newList.addFirst(element);
+                    else
+                        newList.addLast(element);
                 }
                 Entry e = new Entry(new Value.ListValue(newList), 0L);
                 map.put(k, e);
@@ -216,8 +227,10 @@ public final class Store {
             currentMemory -= sizeOf(old);
             Deque<byte[]> list = lv.items();
             for (byte[] element : elements) {
-                if (left) list.addFirst(element);
-                else      list.addLast(element);
+                if (left)
+                    list.addFirst(element);
+                else
+                    list.addLast(element);
             }
             currentMemory += sizeOf(old);
             evictIfNeeded();
@@ -243,7 +256,8 @@ public final class Store {
 
             Deque<byte[]> list = lv.items();
             byte[] element = left ? list.pollFirst() : list.pollLast();
-            if (element != null) currentMemory -= element.length;
+            if (element != null)
+                currentMemory -= element.length;
             if (list.isEmpty()) {
                 map.remove(k);
             }
@@ -284,12 +298,17 @@ public final class Store {
 
             Deque<byte[]> items = lv.items();
             int size = items.size();
-            if (size == 0) return new StoreResult.Success<>(List.of());
+            if (size == 0)
+                return new StoreResult.Success<>(List.of());
 
-            if (start < 0) start += size;
-            if (stop  < 0) stop  += size;
-            if (start < 0) start = 0;
-            if (stop >= size) stop = size - 1;
+            if (start < 0)
+                start += size;
+            if (stop < 0)
+                stop += size;
+            if (start < 0)
+                start = 0;
+            if (stop >= size)
+                stop = size - 1;
             if (start > stop || start >= size) {
                 return new StoreResult.Success<>(List.of());
             }
@@ -297,8 +316,10 @@ public final class Store {
             List<byte[]> result = new ArrayList<>();
             int i = 0;
             for (byte[] element : items) {
-                if (i > stop) break;
-                if (i >= start) result.add(element);
+                if (i > stop)
+                    break;
+                if (i >= start)
+                    result.add(element);
                 i++;
             }
             return new StoreResult.Success<>(result);
@@ -331,8 +352,10 @@ public final class Store {
                 Key field = new Key(fieldValuePairs[i]);
                 byte[] val = fieldValuePairs[i + 1];
                 byte[] oldVal = fields.get(field);
-                if (oldVal == null) newFields++;
-                else delta -= field.bytes().length + oldVal.length;
+                if (oldVal == null)
+                    newFields++;
+                else
+                    delta -= field.bytes().length + oldVal.length;
                 delta += field.bytes().length + val.length;
                 fields.put(field, val);
             }

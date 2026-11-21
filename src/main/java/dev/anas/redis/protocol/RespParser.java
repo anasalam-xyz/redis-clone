@@ -1,111 +1,101 @@
 package dev.anas.redis.protocol;
 
-// TODO:
-// 1. only one parsed per feed()
-// 2. append is quadratic time
-// 3. buffer never shrinks
-
 import java.util.Arrays;
 
 public final class RespParser {
-    private byte[] buffer = new byte[0]; // save leftover bytes from previous read
-    private int pos = 0;
+    private static final int MAX_ARGS = 1_048_576;
+    private static final int MAX_BULK = 512 * 1024 * 1024;
+    private static final int INITIAL_CAPACITY = 16 * 1024;
+    private static final int MAX_RETAINED = 1024 * 1024;
+    private static final ParseResult NEED_MORE = new ParseResult.NeedMore();
 
-    public RespParser() {
-    }
+    private byte[] buf = new byte[INITIAL_CAPACITY];
+    private int pos = 0;      // next unread byte
+    private int limit = 0;    // end of valid data
+    private int cursor = 0;   // scratch position while parsing one command
 
     public ParseResult feed(byte[] chunk) {
-        append(chunk);
-        int startPos = pos;
+        append(chunk, 0, chunk.length);
+        return next();
+    }
 
+    public void append(byte[] chunk, int off, int len) {
+        if (pos == limit) {  // everything consumed: restart at 0
+            pos = limit = 0;
+            if (buf.length > MAX_RETAINED) buf = new byte[INITIAL_CAPACITY];
+        } else if (limit + len > buf.length) {        
+            System.arraycopy(buf, pos, buf, 0, limit - pos);
+            limit -= pos;
+            pos = 0;
+        }
+        if (limit + len > buf.length) {        
+            long want = Math.max((long) buf.length * 2, (long) limit + len);
+            buf = Arrays.copyOf(buf, (int) Math.min(want, Integer.MAX_VALUE - 8));
+        }
+        System.arraycopy(chunk, off, buf, limit, len);
+        limit += len;
+    }
+
+    // Parses the next complete command from the buffer, or returns NeedMore.
+    public ParseResult next() {
+        if (pos >= limit) return NEED_MORE;
         try {
-            byte[] line = readLine();
-            if (line == null) {
-                pos = startPos;
-                return new ParseResult.NeedMore();
+            if (buf[pos] != '*') {
+                return new ParseResult.ParseError("Expected array prefix '*', got: " + (char) buf[pos]);
             }
-            if (line.length == 0) {
-                pos = startPos;
-                return new ParseResult.ParseError("Empty line");
-            }
-            if (line[0] != '*') {
-                pos = startPos;
-                return new ParseResult.ParseError("Expected array prefix '*', got: " + (char) line[0]);
+            cursor = pos + 1;
+            int numArgs = readLength();
+            if (numArgs < 0) return NEED_MORE;
+            if (numArgs == 0 || numArgs > MAX_ARGS) {
+                return new ParseResult.ParseError("Invalid multibulk length");
             }
 
-            int numArgs = parseInt(line, 1, line.length);
             byte[][] args = new byte[numArgs][];
-
             for (int i = 0; i < numArgs; i++) {
-                byte[] bulkLengthLine = readLine();
-
-                if (bulkLengthLine == null) {
-                    pos = startPos;
-                    return new ParseResult.NeedMore();
+                if (cursor >= limit) return NEED_MORE;
+                if (buf[cursor] != '$') {
+                    return new ParseResult.ParseError("Expected string prefix '$', got: " + (char) buf[cursor]);
                 }
-                if (bulkLengthLine.length == 0) {
-                    pos = startPos;
-                    return new ParseResult.ParseError("Empty line");
+                cursor++;
+                int len = readLength();
+                if (len < 0) return NEED_MORE;
+                if (len > MAX_BULK) return new ParseResult.ParseError("Invalid bulk length");
+                if ((long) limit - cursor < (long) len + 2) return NEED_MORE;
+                if (buf[cursor + len] != '\r' || buf[cursor + len + 1] != '\n') {
+                    return new ParseResult.ParseError("Expected CRLF after bulk string");
                 }
-                if (bulkLengthLine[0] != '$') {
-                    pos = startPos;
-                    return new ParseResult.ParseError("Expected string prefix '$', got: " + (char) bulkLengthLine[0]);
-                }
-
-                int bulkLength = parseInt(bulkLengthLine, 1, bulkLengthLine.length);
-
-                if (bulkLength > buffer.length - pos - 2) {
-                    pos = startPos;
-                    return new ParseResult.NeedMore();
-                }
-
-                args[i] = Arrays.copyOfRange(buffer, pos, pos + bulkLength);
-                pos += bulkLength + 2;
+                args[i] = Arrays.copyOfRange(buf, cursor, cursor + len);
+                cursor += len + 2;
             }
-
+            pos = cursor; // commit only when the whole command was parsed
             return new ParseResult.Parsed(args);
-
         } catch (NumberFormatException e) {
-            pos = startPos;
             return new ParseResult.ParseError(e.getMessage());
         }
     }
 
-    private void append(byte[] chunk) {
-        byte[] newBuffer = new byte[buffer.length + chunk.length];
-        System.arraycopy(buffer, 0, newBuffer, 0, buffer.length);
-        System.arraycopy(chunk, 0, newBuffer, buffer.length, chunk.length);
-        buffer = newBuffer;
-    }
-
-    private byte[] readLine() {
-        for (int i = pos; i < buffer.length - 1; i++) {
-            if (buffer[i] == '\r' && buffer[i + 1] == '\n') {
-                byte[] line = Arrays.copyOfRange(buffer, pos, i);
-                pos = i + 2; // Move past the \r\n
-                return line;
-            }
-        }
-
-        return null; // No complete line found
-    }
-
-    private int parseInt(byte[] line, int start, int end) {
-        if (start >= end) {
-            throw new NumberFormatException("Empty integer");
-        }
+    // Reads "<digits>\r\n" at cursor. Returns the value, or -1 if the line is incomplete.
+    private int readLength() {
+        int i = cursor;
         int result = 0;
-
-        for (int i = start; i < end; i++) {
-            if (line[i] < '0' || line[i] > '9') {
-                throw new NumberFormatException("Invalid integer");
+        int digits = 0;
+        while (i < limit) {
+            byte b = buf[i];
+            if (b == '\r') {
+                if (i + 1 >= limit) return -1;
+                if (buf[i + 1] != '\n') throw new NumberFormatException("Expected \\n after \\r");
+                if (digits == 0) throw new NumberFormatException("Empty integer");
+                cursor = i + 2;
+                return result;
             }
-            if (result > (Integer.MAX_VALUE - (line[i] - '0')) / 10) {
+            if (b < '0' || b > '9') throw new NumberFormatException("Invalid integer");
+            if (result > (Integer.MAX_VALUE - (b - '0')) / 10) {
                 throw new NumberFormatException("Integer overflow");
             }
-            result = result * 10 + (line[i] - '0');
+            result = result * 10 + (b - '0');
+            digits++;
+            i++;
         }
-
-        return result;
+        return -1;
     }
 }

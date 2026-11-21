@@ -5,12 +5,14 @@ import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.Locale;
 
 import dev.anas.redis.persistence.AofWriter;
 import dev.anas.redis.protocol.Reply;
 
 public final class Dispatcher {
+    private final ReentrantLock writeOrder = new ReentrantLock();   // not synchronized: JDK 21 pins carrier threads on file I/O inside it
     private final Map<String, Command> commands = new HashMap<>();
     private AofWriter aof;
 
@@ -41,21 +43,27 @@ public final class Dispatcher {
 
         String name = new String(args[0], StandardCharsets.US_ASCII).toLowerCase(Locale.ROOT);
         Command command = commands.get(name);
-
         if (command == null) {
             return new Reply.Error("ERR unknown command '" + name + "'");
         }
 
-        Reply reply = command.execute(Arrays.copyOfRange(args, 1, args.length));
-
-        if (persist && aof != null && command.isWrite() && !(reply instanceof Reply.Error)) {
-            try {
-                aof.append(args);
-            } catch (IOException e) {
-                System.err.println("AOF write failed: " + e.getMessage());
-            }
+        byte[][] rest = Arrays.copyOfRange(args, 1, args.length);
+        if (!(persist && aof != null && command.isWrite())) {
+            return command.execute(rest);
         }
-
-        return reply;
+        writeOrder.lock();
+        try {
+            Reply reply = command.execute(rest);
+            if (!(reply instanceof Reply.Error)) {
+                try {
+                    aof.append(args);
+                } catch (IOException e) {
+                    System.err.println("AOF write failed: " + e.getMessage());
+                }
+            }
+            return reply;
+        } finally {
+            writeOrder.unlock();
+        }
     }
 }

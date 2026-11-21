@@ -19,3 +19,12 @@ Thumbs.db
 dump.rdb
 
 appendonly.aof
+*.aof
+*.txt
+*.log
+*.sh
+gc.log.0
+gc*.log*
+*.jfr
+bench-*.txt
+bench2-*.txt

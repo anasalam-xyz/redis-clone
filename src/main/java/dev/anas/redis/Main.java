@@ -18,13 +18,16 @@ import dev.anas.redis.pubsub.Command;
 
 public final class Main {
     public static void main(String[] args) throws Exception {
-        int port = 6380;
+        Config config = Config.parse(args);
 
-        Store store = new Store();
-        store.setMaxMemory(100L * 1024 * 1024);   // 100 MB, set 0 for unlimited
-        AofWriter aof = new AofWriter("appendonly.aof");
+        Store store = new Store(config.maxMemory());
+
+        AofWriter aof = config.appendOnly()
+                ? new AofWriter(config.aofPath().toString())
+                : null;
         Dispatcher dispatcher = new Dispatcher(aof);
 
+        dispatcher.register("config", new ConfigCommand(config));
         dispatcher.register("ping", new PingCommand());
         dispatcher.register("echo", new EchoCommand());
         dispatcher.register("set", new SetCommand(store));
@@ -56,13 +59,15 @@ public final class Main {
         ExpirySweeper sweeper = new ExpirySweeper(store, 100);
         sweeper.start();
 
-        AofLoader.replay("appendonly.aof", dispatcher);
+        if (config.appendOnly()) {
+            AofLoader.replay(config.aofPath().toString(), dispatcher);
+        }
+
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             try {
-                aof.close();
+                if (aof != null)
+                    aof.close();
             } catch (IOException ignored) {
-                // During JVM shutdown, close failure has nowhere to report. The process is
-                // exiting.
             }
         }));
 
@@ -71,7 +76,7 @@ public final class Main {
                 "subscribe", new SubscribeCommand(broker),
                 "unsubscribe", new UnsubscribeCommand(broker),
                 "publish", new PublishCommand(broker));
-                
-        new Server(port, dispatcher, pubsub).start();
+
+        new Server(config.port(), dispatcher, pubsub).start();
     }
 }

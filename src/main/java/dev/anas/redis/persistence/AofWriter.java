@@ -43,18 +43,22 @@ public final class AofWriter implements AutoCloseable {
         this.flushThread.start();
     }
 
-    public synchronized void append(byte[][] args) throws IOException {
+    public void append(byte[][] args) throws IOException {
         List<Reply> list = new ArrayList<>();
 
         for(byte[] arg: args) {
             list.add(new Reply.BulkString(arg));
         }
         
-        buf.write(RespWriter.write(new Reply.Array(list)));
+        synchronized(this) {
+            RespWriter.writeCommand(buf, args);
+        }
     }
 
-    public synchronized void fsync() throws IOException {
-        buf.flush(); // Java buffer -> OS
+    public void fsync() throws IOException {
+        synchronized(this) {
+            buf.flush(); // Java buffer -> OS
+        }
         fos.getFD().sync(); // OS -> disk
     }
 

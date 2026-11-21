@@ -163,28 +163,55 @@ class StoreTest {
         assertEquals(5, s.sweepExpired());
     }
 
-    @Test
-    void evictsLruKeyWhenOverLimit() {
-        Store s = new Store();
-        s.setMaxMemory(20); // small
-        s.set(bytes("a"), new Value.StringValue(new byte[10]), 0L);
-        s.set(bytes("b"), new Value.StringValue(new byte[10]), 0L);
-        // both fit (20 bytes total, at limit)
-        assertNotNull(s.get(bytes("a"))); // 'a' becomes MRU
-        s.set(bytes("c"), new Value.StringValue(new byte[10]), 0L);
-        // over limit (30 > 20) → evict LRU = 'b'
-        assertNull(s.get(bytes("b")));
-        assertNotNull(s.get(bytes("a"))); // 'a' survived (recently accessed)
-        assertNotNull(s.get(bytes("c")));
+    private static byte[] b(String s) {
+        return s.getBytes(java.nio.charset.StandardCharsets.UTF_8);
     }
 
     @Test
-    void noEvictionWhenLimitIsZero() {
-        Store s = new Store();
-        s.setMaxMemory(0); // unlimited
-        for (int i = 0; i < 100; i++) {
-            s.set(bytes("k" + i), new Value.StringValue(new byte[1000]), 0L);
+    void unlimitedStoreNeverEvicts() {
+        Store store = new Store(); // limit 0 = unlimited
+        for (int i = 0; i < 10_000; i++) {
+            store.set(b("k" + i), new Value.StringValue(b("value-" + i)), 0L);
         }
-        assertNotNull(s.get(bytes("k0"))); // nothing evicted
+        for (int i = 0; i < 10_000; i++) {
+            assertNotNull(store.get(b("k" + i)), "k" + i + " was evicted");
+        }
+    }
+
+    @Test
+    void evictsLeastRecentlyUsedKeyWhenOverLimit() {
+        Store store = new Store(10);
+        store.set(b("a"), new Value.StringValue(b("aaaaa")), 0L); // 5 bytes
+        store.set(b("b"), new Value.StringValue(b("bbbbb")), 0L); // 5 bytes, total 10: at the limit
+        store.get(b("a")); // a is now more recent than b
+        store.set(b("c"), new Value.StringValue(b("ccccc")), 0L); // total 15: must evict b
+
+        assertNull(store.get(b("b")), "b was least recently used");
+        assertNotNull(store.get(b("a")));
+        assertNotNull(store.get(b("c")));
+    }
+
+    @Test
+    void overwritingAKeyDoesNotLeakMemoryAccounting() {
+        Store store = new Store(10);
+        for (int i = 0; i < 100; i++) {
+            store.set(b("a"), new Value.StringValue(b("aaaaa")), 0L);
+        }
+        store.set(b("b"), new Value.StringValue(b("bbbbb")), 0L); // 5 + 5 = 10: nothing should be evicted
+
+        assertNotNull(store.get(b("a")), "accounting leaked and a was evicted");
+        assertNotNull(store.get(b("b")));
+    }
+
+    @Test
+    void setReplacesAKeyHoldingAnotherType() {
+        Store store = new Store();
+        store.listPushAll(b("k"), new byte[][] { b("x"), b("y") }, false);
+
+        store.set(b("k"), new Value.StringValue(b("v")), 0L);
+
+        Value v = store.get(b("k"));
+        Value.StringValue sv = assertInstanceOf(Value.StringValue.class, v);
+        assertArrayEquals(b("v"), sv.bytes());
     }
 }

@@ -80,7 +80,6 @@ class AofIntegrationTest {
         assertTrue(sizeAfterFirstRun > 0, "AOF should have content after write");
 
         // --- Second run: replay from AOF, verify data + AOF didn't grow ---
-        int port2 = freePort();
         Store store2 = new Store();
         AofWriter aof2 = new AofWriter(aofPath.toString());
         Dispatcher d2 = buildDispatcher(store2, aof2);

@@ -24,7 +24,7 @@ class SetCommandTest {
         Store store = new Store();
         SetCommand cmd = new SetCommand(store);
 
-        Reply r = cmd.execute(new byte[][]{bytes("k"), bytes("v")});
+        Reply r = cmd.execute(new byte[][] { bytes("k"), bytes("v") });
 
         assertInstanceOf(Reply.SimpleString.class, r);
         assertEquals("OK", ((Reply.SimpleString) r).s());
@@ -36,35 +36,48 @@ class SetCommandTest {
         Store store = new Store();
         SetCommand cmd = new SetCommand(store);
 
-        cmd.execute(new byte[][]{bytes("k"), bytes("old")});
-        cmd.execute(new byte[][]{bytes("k"), bytes("new")});
+        cmd.execute(new byte[][] { bytes("k"), bytes("old") });
+        cmd.execute(new byte[][] { bytes("k"), bytes("new") });
 
         assertArrayEquals(bytes("new"), bytesOf(store.get(bytes("k"))));
     }
 
     @Test
-    void setOnNonStringKeyReturnsWrongType() {
+    void overwritesAKeyHoldingAList() {
         Store store = new Store();
-        // Pre-populate with a list — SET must not overwrite it.
-        store.set(bytes("k"), new Value.ListValue(new java.util.ArrayDeque<>()), 0L);
-        SetCommand cmd = new SetCommand(store);
+        store.listPushAll(b("k"), new byte[][] { b("x") }, false);
 
-        Reply r = cmd.execute(new byte[][]{bytes("k"), bytes("v")});
-        assertInstanceOf(Reply.Error.class, r);
-        String msg = ((Reply.Error) r).msg();
-        assertTrue(msg.startsWith("WRONGTYPE"), "expected WRONGTYPE, got: " + msg);
+        Reply reply = new SetCommand(store).execute(new byte[][] { b("k"), b("v") });
+
+        assertEquals(new Reply.SimpleString("OK"), reply);
+        Value.StringValue sv = assertInstanceOf(Value.StringValue.class, store.get(b("k")));
+        assertArrayEquals(b("v"), sv.bytes());
+    }
+
+    @Test
+    void setClearsExistingExpiry() {
+        Store store = new Store();
+        store.set(b("k"), new Value.StringValue(b("old")), System.currentTimeMillis() + 60_000);
+
+        new SetCommand(store).execute(new byte[][] { b("k"), b("new") });
+
+        assertEquals(0L, store.getExpiry(b("k"))); // 0 = no expiry
     }
 
     @Test
     void wrongArityReturnsError() {
         SetCommand cmd = new SetCommand(new Store());
         assertInstanceOf(Reply.Error.class, cmd.execute(new byte[0][]));
-        assertInstanceOf(Reply.Error.class, cmd.execute(new byte[][]{bytes("k")}));
-        assertInstanceOf(Reply.Error.class, cmd.execute(new byte[][]{bytes("k"), bytes("v"), bytes("x")}));
+        assertInstanceOf(Reply.Error.class, cmd.execute(new byte[][] { bytes("k") }));
+        assertInstanceOf(Reply.Error.class, cmd.execute(new byte[][] { bytes("k"), bytes("v"), bytes("x") }));
     }
 
     @Test
     void isWrite() {
         assertTrue(new SetCommand(new Store()).isWrite());
+    }
+
+    private static byte[] b(String s) {
+        return s.getBytes(java.nio.charset.StandardCharsets.UTF_8);
     }
 }
