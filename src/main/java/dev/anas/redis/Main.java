@@ -21,6 +21,7 @@ public final class Main {
         int port = 6380;
 
         Store store = new Store();
+        store.setMaxMemory(100L * 1024 * 1024);   // 100 MB, set 0 for unlimited
         AofWriter aof = new AofWriter("appendonly.aof");
         Dispatcher dispatcher = new Dispatcher(aof);
 
@@ -70,6 +71,7 @@ public final class Main {
                 "subscribe", new SubscribeCommand(broker),
                 "unsubscribe", new UnsubscribeCommand(broker),
                 "publish", new PublishCommand(broker));
+                
         new Server(port, dispatcher, pubsub).start();
     }
 }

@@ -73,8 +73,8 @@ class StoreTest {
     @Test
     void binaryKeyAndValueRoundTrip() {
         Store s = new Store();
-        byte[] key   = {'k', 0x00, (byte) 0xFF, '\r', '\n'};
-        byte[] value = {0x00, (byte) 0x80, (byte) 0xFF, 'x'};
+        byte[] key = { 'k', 0x00, (byte) 0xFF, '\r', '\n' };
+        byte[] value = { 0x00, (byte) 0x80, (byte) 0xFF, 'x' };
         s.set(key, new Value.StringValue(value), 0L);
         assertArrayEquals(value, bytesOf(s.get(key)));
     }
@@ -161,5 +161,30 @@ class StoreTest {
         }
         Thread.sleep(100);
         assertEquals(5, s.sweepExpired());
+    }
+
+    @Test
+    void evictsLruKeyWhenOverLimit() {
+        Store s = new Store();
+        s.setMaxMemory(20); // small
+        s.set(bytes("a"), new Value.StringValue(new byte[10]), 0L);
+        s.set(bytes("b"), new Value.StringValue(new byte[10]), 0L);
+        // both fit (20 bytes total, at limit)
+        assertNotNull(s.get(bytes("a"))); // 'a' becomes MRU
+        s.set(bytes("c"), new Value.StringValue(new byte[10]), 0L);
+        // over limit (30 > 20) → evict LRU = 'b'
+        assertNull(s.get(bytes("b")));
+        assertNotNull(s.get(bytes("a"))); // 'a' survived (recently accessed)
+        assertNotNull(s.get(bytes("c")));
+    }
+
+    @Test
+    void noEvictionWhenLimitIsZero() {
+        Store s = new Store();
+        s.setMaxMemory(0); // unlimited
+        for (int i = 0; i < 100; i++) {
+            s.set(bytes("k" + i), new Value.StringValue(new byte[1000]), 0L);
+        }
+        assertNotNull(s.get(bytes("k0"))); // nothing evicted
     }
 }

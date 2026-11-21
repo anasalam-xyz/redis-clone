@@ -17,3 +17,5 @@ Thumbs.db
 *.log
 *.aof
 dump.rdb
+
+appendonly.aof
