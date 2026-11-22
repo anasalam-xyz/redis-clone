@@ -57,6 +57,7 @@ public final class Main {
         dispatcher.register("hexists", new HexistsCommand(store));
 
         ExpirySweeper sweeper = new ExpirySweeper(store, 100);
+        store.setSweeper(sweeper);
         sweeper.start();
 
         if (config.appendOnly()) {
