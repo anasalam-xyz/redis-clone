@@ -119,6 +119,40 @@ public final class Store {
         }
     }
 
+    public boolean setWithOptions(byte[] key, Value value, long expireAtMillis,
+            boolean nx, boolean xx) {
+        lock.lock();
+        try {
+            Key k = new Key(key);
+            Entry old = map.get(k);
+
+            // Treat an expired entry as absent
+            boolean exists = (old != null && !old.isExpired(System.currentTimeMillis()));
+
+            if (nx && exists) {
+                return false;
+            }
+            if (xx && !exists) {
+                return false;
+            }
+
+            if (old != null) {
+                currentMemory -= sizeOf(old);
+            }
+            Entry e = new Entry(value, expireAtMillis);
+            map.put(k, e);
+            currentMemory += sizeOf(e);
+            evictIfNeeded();
+
+            if (expireAtMillis != 0L && sweeper != null) {
+                sweeper.schedule(key, expireAtMillis);
+            }
+            return true;
+        } finally {
+            lock.unlock();
+        }
+    }
+
     public boolean del(byte[] key) {
         lock.lock();
         try {
@@ -147,10 +181,8 @@ public final class Store {
                 }
                 return false;
             }
-            currentMemory -= sizeOf(old);
             Entry e = new Entry(old.value(), expireAtMillis);
             map.put(k, e);
-            currentMemory += sizeOf(e);
             if (expireAtMillis != 0L && sweeper != null) {
                 sweeper.schedule(key, expireAtMillis);
             }
@@ -190,32 +222,12 @@ public final class Store {
                 }
                 return false;
             }
-            if (old.expireAtMillis() == 0L)
+            if (old.expireAtMillis() == 0L) {
                 return false;
-            currentMemory -= sizeOf(old);
+            }
             Entry e = new Entry(old.value(), 0L);
             map.put(k, e);
-            currentMemory += sizeOf(e);
             return true;
-        } finally {
-            lock.unlock();
-        }
-    }
-
-    public int sweepExpired() {
-        lock.lock();
-        try {
-            long now = System.currentTimeMillis();
-            int count = map.size();
-            map.entrySet().removeIf(e -> {
-                Entry entry = e.getValue();
-                if (entry.isExpired(now)) {
-                    currentMemory -= sizeOf(entry);
-                    return true;
-                }
-                return false;
-            });
-            return count - map.size();
         } finally {
             lock.unlock();
         }
@@ -245,40 +257,32 @@ public final class Store {
         try {
             Key k = new Key(key);
             Entry old = map.get(k);
+            boolean fresh = old == null || old.isExpired(System.currentTimeMillis());
 
-            if (old == null || old.isExpired(System.currentTimeMillis())) {
-                if(old != null) {
-                    currentMemory -= sizeOf(old);
-                }
-                Deque<byte[]> newList = new ArrayDeque<>();
-                for (byte[] element : elements) {
-                    if (left)
-                        newList.addFirst(element);
-                    else
-                        newList.addLast(element);
-                }
-                Entry e = new Entry(new Value.ListValue(newList), 0L);
-                map.put(k, e);
-                currentMemory += sizeOf(e);
-                evictIfNeeded();
-                return new StoreResult.Success<>((long) newList.size());
-            }
-
-            if (!(old.value() instanceof Value.ListValue lv)) {
+            if (!fresh && !(old.value() instanceof Value.ListValue)) {
                 return new StoreResult.WrongType<>();
             }
 
-            currentMemory -= sizeOf(old);
-            Deque<byte[]> list = lv.items();
+            Deque<byte[]> list;
+            if (fresh) {
+                if (old != null)
+                    currentMemory -= sizeOf(old); // replacing an expired entry
+                list = new ArrayDeque<>();
+                map.put(k, new Entry(new Value.ListValue(list), 0L));
+            } else {
+                list = ((Value.ListValue) old.value()).items();
+            }
+
+            long added = 0;
             for (byte[] element : elements) {
                 if (left)
                     list.addFirst(element);
                 else
                     list.addLast(element);
+                added += element.length;
             }
-            currentMemory += sizeOf(old);
+            currentMemory += added;
             evictIfNeeded();
-
             return new StoreResult.Success<>((long) list.size());
         } finally {
             lock.unlock();
@@ -380,7 +384,7 @@ public final class Store {
             Value.HashValue hv;
 
             if (e == null || e.isExpired(System.currentTimeMillis())) {
-                if(e != null) {
+                if (e != null) {
                     currentMemory -= sizeOf(e);
                 }
                 hv = new Value.HashValue(new HashMap<>());
