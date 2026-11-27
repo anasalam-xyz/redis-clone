@@ -11,7 +11,7 @@ import java.util.ArrayList;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.Iterator;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.NoSuchFileException;
+import java.util.function.Consumer;
 
 public final class Store {
     private final ReentrantLock lock = new ReentrantLock();
@@ -25,6 +25,17 @@ public final class Store {
     private static final byte[] CMD_RPUSH = ascii("RPUSH");
     private static final byte[] CMD_HSET = ascii("HSET");
     private static final byte[] CMD_PEXPIREAT = ascii("PEXPIREAT");
+
+    private volatile Consumer<byte[]> evictionListener;
+    private volatile boolean evictionPaused;
+
+    public void setEvictionListener(Consumer<byte[]> listener) {
+        this.evictionListener = listener;
+    }
+
+    public void setEvictionPaused(boolean paused) {
+        this.evictionPaused = paused;
+    }
 
     public Store() {
         this(0);
@@ -150,12 +161,15 @@ public final class Store {
     }
 
     private void evictIfNeeded() {
-        if (maxMemory <= 0)
+        if (maxMemory <= 0 || evictionPaused)
             return;
         while (currentMemory > maxMemory && !map.isEmpty()) {
             Map.Entry<Key, Entry> lru = map.entrySet().iterator().next();
             currentMemory -= sizeOf(lru.getValue());
             map.remove(lru.getKey());
+            Consumer<byte[]> listener = evictionListener;
+            if (listener != null)
+                listener.accept(lru.getKey().bytes());
         }
     }
 

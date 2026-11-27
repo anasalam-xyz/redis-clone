@@ -9,6 +9,9 @@ import java.util.concurrent.locks.ReentrantLock;
 import java.util.Locale;
 import java.util.function.Supplier;
 import java.util.Iterator;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.List;
+import java.util.ArrayList;
 
 import dev.anas.redis.persistence.AofWriter;
 import dev.anas.redis.protocol.Reply;
@@ -18,6 +21,10 @@ public final class Dispatcher {
                                                                   // file I/O inside it
     private final Map<String, Command> commands = new HashMap<>();
     private AofWriter aof;
+
+    private final AtomicBoolean rewriting = new AtomicBoolean(false);
+    private static final byte[] DEL = "DEL".getBytes(StandardCharsets.US_ASCII);
+    private final List<byte[]> pendingEvictions = new ArrayList<>();
 
     public Dispatcher() {
         this.aof = null;
@@ -66,24 +73,53 @@ public final class Dispatcher {
             }
             return reply;
         } finally {
+            flushEvictions();
             writeOrder.unlock();
         }
     }
 
-    public void rewriteAof(Supplier<Iterator<byte[][]>> snapshot) throws IOException {
+    public boolean aofEnabled() {
+        return aof != null;
+    }
+
+    public boolean rewriteAof(Supplier<Iterator<byte[][]>> snapshot) throws IOException {
         if (aof == null)
-            return;
+            return false;
+        if (!rewriting.compareAndSet(false, true))
+            return false;
         writeOrder.lock();
         try {
-            aof.rewrite(snapshot.get()); // snapshot is created and consumed under the lock
+            aof.rewrite(snapshot.get());
+            return true;
         } finally {
             writeOrder.unlock();
+            rewriting.set(false);
         }
     }
 
     public void maybeRewriteAof(Supplier<Iterator<byte[][]>> snapshot) throws IOException {
         if (aof != null && aof.shouldRewrite()) {
             rewriteAof(snapshot);
+        }
+    }
+
+    public void onEvicted(byte[] key) {
+        if (aof != null && writeOrder.isHeldByCurrentThread()) {
+            pendingEvictions.add(key);
+        }
+    }
+
+    private void flushEvictions() {
+        if (pendingEvictions.isEmpty())
+            return;
+        try {
+            for (byte[] key : pendingEvictions) {
+                aof.append(new byte[][] { DEL, key });
+            }
+        } catch (IOException e) {
+            System.err.println("AOF write failed: " + e.getMessage());
+        } finally {
+            pendingEvictions.clear();
         }
     }
 }

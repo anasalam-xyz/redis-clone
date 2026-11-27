@@ -31,6 +31,7 @@ public final class Main {
                 : null;
 
         Dispatcher dispatcher = new Dispatcher(aof);
+        store.setEvictionListener(dispatcher::onEvicted);
         RateLimiter rateLimiter = new RateLimiter();
 
         dispatcher.register("config", new ConfigCommand(config));
@@ -71,13 +72,19 @@ public final class Main {
         dispatcher.register("hexists", new HexistsCommand(store));
 
         dispatcher.register("ratelimit", new RatelimitCommand(rateLimiter));
+        dispatcher.register("bgrewriteaof", new BgrewriteaofCommand(dispatcher, store));
 
         ExpirySweeper sweeper = new ExpirySweeper(store, 100);
         store.setSweeper(sweeper);
         sweeper.start();
 
         if (config.appendOnly()) {
-            AofLoader.replay(config.aofPath().toString(), dispatcher);
+            store.setEvictionPaused(true);
+            try {
+                AofLoader.replay(config.aofPath().toString(), dispatcher);
+            } finally {
+                store.setEvictionPaused(false);
+            }
         }
 
         ScheduledExecutorService sched = Executors.newSingleThreadScheduledExecutor(r -> {
@@ -90,7 +97,7 @@ public final class Main {
             try {
                 dispatcher.maybeRewriteAof(store::snapshotAsCommands);
             } catch (Exception e) {
-                System.err.println("AOF rewrite failed: " + e.getMessage());
+                System.err.println("AOF rewrite failed: " + e);
             }
         }, 1, 1, TimeUnit.SECONDS);
 
