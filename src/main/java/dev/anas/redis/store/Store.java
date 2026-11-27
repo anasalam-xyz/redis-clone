@@ -5,9 +5,13 @@ import java.util.Deque;
 import java.util.LinkedHashMap;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.NoSuchElementException;
 import java.util.List;
 import java.util.ArrayList;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.Iterator;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.NoSuchFileException;
 
 public final class Store {
     private final ReentrantLock lock = new ReentrantLock();
@@ -15,6 +19,12 @@ public final class Store {
     private final long maxMemory;
     private long currentMemory = 0;
     private ExpirySweeper sweeper;
+
+    private static final int ITEMS_PER_COMMAND = 64; // same chunk size real Redis uses
+    private static final byte[] CMD_SET = ascii("SET");
+    private static final byte[] CMD_RPUSH = ascii("RPUSH");
+    private static final byte[] CMD_HSET = ascii("HSET");
+    private static final byte[] CMD_PEXPIREAT = ascii("PEXPIREAT");
 
     public Store() {
         this(0);
@@ -27,6 +37,97 @@ public final class Store {
     public Store(long maxMemory) {
         this.maxMemory = maxMemory;
         this.map = new LinkedHashMap<>(16, 0.75f, maxMemory > 0); // access order only if evicting
+    }
+
+    private static byte[] ascii(String s) {
+        return s.getBytes(StandardCharsets.US_ASCII);
+    }
+
+    public Iterator<byte[][]> snapshotAsCommands() {
+        long now = System.currentTimeMillis();
+        List<Map.Entry<Key, Entry>> live;
+
+        lock.lock();
+        try {
+            live = new ArrayList<>(map.size());
+            for (Map.Entry<Key, Entry> e : map.entrySet()) {
+                if (!e.getValue().isExpired(now)) {
+                    live.add(Map.entry(e.getKey(), e.getValue()));
+                }
+            }
+        } finally {
+            lock.unlock();
+        }
+
+        Iterator<Map.Entry<Key, Entry>> source = live.iterator();
+        Deque<byte[][]> pending = new ArrayDeque<>();
+
+        return new Iterator<>() {
+            @Override
+            public boolean hasNext() {
+                while (pending.isEmpty() && source.hasNext()) {
+                    Map.Entry<Key, Entry> e = source.next();
+                    emit(e.getKey().bytes(), e.getValue(), pending);
+                }
+                return !pending.isEmpty();
+            }
+
+            @Override
+            public byte[][] next() {
+                if (!hasNext())
+                    throw new NoSuchElementException();
+                return pending.poll();
+            }
+        };
+    }
+
+    private static void emit(byte[] key, Entry entry, Deque<byte[][]> out) {
+        switch (entry.value()) {
+            case Value.StringValue s -> out.add(new byte[][] { CMD_SET, key, s.bytes() });
+
+            case Value.ListValue l -> {
+                List<byte[]> batch = new ArrayList<>(ITEMS_PER_COMMAND);
+                for (byte[] item : l.items()) { // head to tail, so RPUSH rebuilds the same order
+                    batch.add(item);
+                    if (batch.size() == ITEMS_PER_COMMAND) {
+                        out.add(command(CMD_RPUSH, key, batch));
+                        batch.clear();
+                    }
+                }
+                if (!batch.isEmpty())
+                    out.add(command(CMD_RPUSH, key, batch));
+            }
+
+            case Value.HashValue h -> {
+                List<byte[]> batch = new ArrayList<>(ITEMS_PER_COMMAND * 2);
+                int fields = 0;
+                for (Map.Entry<Key, byte[]> f : h.fields().entrySet()) {
+                    batch.add(f.getKey().bytes());
+                    batch.add(f.getValue());
+                    if (++fields == ITEMS_PER_COMMAND) {
+                        out.add(command(CMD_HSET, key, batch));
+                        batch.clear();
+                        fields = 0;
+                    }
+                }
+                if (!batch.isEmpty())
+                    out.add(command(CMD_HSET, key, batch));
+            }
+        }
+
+        long expireAt = entry.expireAtMillis();
+        if (expireAt != 0L) {
+            out.add(new byte[][] { CMD_PEXPIREAT, key, ascii(Long.toString(expireAt)) });
+        }
+    }
+
+    private static byte[][] command(byte[] name, byte[] key, List<byte[]> args) {
+        byte[][] cmd = new byte[2 + args.size()][];
+        cmd[0] = name;
+        cmd[1] = key;
+        for (int i = 0; i < args.size(); i++)
+            cmd[2 + i] = args.get(i);
+        return cmd;
     }
 
     private static long sizeOf(Entry entry) {

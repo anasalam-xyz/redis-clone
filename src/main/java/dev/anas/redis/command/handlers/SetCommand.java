@@ -1,5 +1,7 @@
 package dev.anas.redis.command.handlers;
 
+import java.nio.charset.StandardCharsets;
+
 import dev.anas.redis.command.Command;
 import dev.anas.redis.protocol.Reply;
 import dev.anas.redis.store.Store;
@@ -42,7 +44,7 @@ public final class SetCommand implements Command {
                         expireAtMillis = switch (opt) {
                             case "EX" -> System.currentTimeMillis() + Math.multiplyExact(raw, 1000L);
                             case "PX" -> System.currentTimeMillis() + raw;
-                            case "EXAT"-> Math.multiplyExact(raw, 1000L);
+                            case "EXAT" -> Math.multiplyExact(raw, 1000L);
                             case "PXAT" -> raw;
                             default -> throw new IllegalStateException();
                         };
@@ -51,11 +53,13 @@ public final class SetCommand implements Command {
                     }
                 }
                 case "NX" -> {
-                    if (nx || xx) return new Reply.Error("ERR syntax error");
+                    if (nx || xx)
+                        return new Reply.Error("ERR syntax error");
                     nx = true;
                 }
                 case "XX" -> {
-                    if (xx || nx) return new Reply.Error("ERR syntax error");
+                    if (xx || nx)
+                        return new Reply.Error("ERR syntax error");
                     xx = true;
                 }
                 default -> {
@@ -82,5 +86,31 @@ public final class SetCommand implements Command {
 
     private static String ascii(byte[] b) {
         return new String(b, java.nio.charset.StandardCharsets.US_ASCII);
+    }
+
+    @Override
+    public byte[][] toAofArgs(byte[][] fullArgs) {
+        byte[][] out = fullArgs.clone();
+        long now = System.currentTimeMillis();
+        for (int i = 3; i < out.length; i++) {
+            String opt = ascii(out[i]).toUpperCase(java.util.Locale.ROOT);
+            switch (opt) {
+                case "EX", "PX", "EXAT" -> {
+                    long raw = Long.parseLong(ascii(out[i + 1]));
+                    long at = switch (opt) {
+                        case "EX" -> now + raw * 1000L;
+                        case "PX" -> now + raw;
+                        default -> raw * 1000L; // EXAT
+                    };
+                    out[i] = "PXAT".getBytes(StandardCharsets.US_ASCII);
+                    out[i + 1] = Long.toString(at).getBytes(StandardCharsets.US_ASCII);
+                    i++; // skip the value we just replaced
+                }
+                case "PXAT" -> i++; // already absolute
+                default -> {
+                } // NX / XX stay as they are
+            }
+        }
+        return out;
     }
 }

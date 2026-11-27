@@ -7,12 +7,15 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.Locale;
+import java.util.function.Supplier;
+import java.util.Iterator;
 
 import dev.anas.redis.persistence.AofWriter;
 import dev.anas.redis.protocol.Reply;
 
 public final class Dispatcher {
-    private final ReentrantLock writeOrder = new ReentrantLock();   // not synchronized: JDK 21 pins carrier threads on file I/O inside it
+    private final ReentrantLock writeOrder = new ReentrantLock(); // not synchronized: JDK 21 pins carrier threads on
+                                                                  // file I/O inside it
     private final Map<String, Command> commands = new HashMap<>();
     private AofWriter aof;
 
@@ -56,7 +59,7 @@ public final class Dispatcher {
             Reply reply = command.execute(rest);
             if (!(reply instanceof Reply.Error)) {
                 try {
-                    aof.append(args);
+                    aof.append(command.toAofArgs(args));
                 } catch (IOException e) {
                     System.err.println("AOF write failed: " + e.getMessage());
                 }
@@ -64,6 +67,23 @@ public final class Dispatcher {
             return reply;
         } finally {
             writeOrder.unlock();
+        }
+    }
+
+    public void rewriteAof(Supplier<Iterator<byte[][]>> snapshot) throws IOException {
+        if (aof == null)
+            return;
+        writeOrder.lock();
+        try {
+            aof.rewrite(snapshot.get()); // snapshot is created and consumed under the lock
+        } finally {
+            writeOrder.unlock();
+        }
+    }
+
+    public void maybeRewriteAof(Supplier<Iterator<byte[][]>> snapshot) throws IOException {
+        if (aof != null && aof.shouldRewrite()) {
+            rewriteAof(snapshot);
         }
     }
 }

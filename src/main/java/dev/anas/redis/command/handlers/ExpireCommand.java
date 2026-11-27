@@ -38,4 +38,17 @@ public final class ExpireCommand implements Command {
     public boolean isWrite() {
         return true;
     }
+
+    @Override
+    public byte[][] toAofArgs(byte[][] fullArgs) {
+        long seconds = Long.parseLong(new String(fullArgs[2], StandardCharsets.US_ASCII));
+        if (seconds <= 0)
+            return fullArgs; // means "delete now", safe to replay as is
+        long at = System.currentTimeMillis() + seconds * 1000L;
+        return new byte[][] {
+                "PEXPIREAT".getBytes(StandardCharsets.US_ASCII),
+                fullArgs[1],
+                Long.toString(at).getBytes(StandardCharsets.US_ASCII)
+        };
+    }
 }

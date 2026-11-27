@@ -2,6 +2,9 @@ package dev.anas.redis;
 
 import java.io.IOException;
 import java.util.Map;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 import dev.anas.redis.command.Dispatcher;
 import dev.anas.redis.command.handlers.*;
@@ -42,6 +45,7 @@ public final class Main {
         dispatcher.register("exists", new ExistsCommand(store));
         dispatcher.register("expire", new ExpireCommand(store));
         dispatcher.register("pexpire", new PexpireCommand(store));
+        dispatcher.register("pexpireat", new PexpireatCommand(store));
         dispatcher.register("ttl", new TtlCommand(store));
         dispatcher.register("pttl", new PttlCommand(store));
         dispatcher.register("persist", new PersistCommand(store));
@@ -59,7 +63,7 @@ public final class Main {
         dispatcher.register("rpop", new RpopCommand(store));
         dispatcher.register("llen", new LlenCommand(store));
         dispatcher.register("lrange", new LrangeCommand(store));
-        
+
         dispatcher.register("hset", new HsetCommand(store));
         dispatcher.register("hget", new HgetCommand(store));
         dispatcher.register("hdel", new HdelCommand(store));
@@ -76,10 +80,26 @@ public final class Main {
             AofLoader.replay(config.aofPath().toString(), dispatcher);
         }
 
+        ScheduledExecutorService sched = Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread t = new Thread(r, "aof-rewrite");
+            t.setDaemon(true);
+            return t;
+        });
+
+        sched.scheduleWithFixedDelay(() -> {
+            try {
+                dispatcher.maybeRewriteAof(store::snapshotAsCommands);
+            } catch (Exception e) {
+                System.err.println("AOF rewrite failed: " + e.getMessage());
+            }
+        }, 1, 1, TimeUnit.SECONDS);
+
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             try {
-                if (aof != null)
+                if (aof != null) {
+                    sched.shutdownNow();
                     aof.close();
+                }
             } catch (IOException ignored) {
             }
         }));

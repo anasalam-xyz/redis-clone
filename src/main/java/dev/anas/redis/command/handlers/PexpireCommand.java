@@ -15,7 +15,7 @@ public final class PexpireCommand implements Command {
     @Override
     public Reply execute(byte[][] args) {
         if (args.length != 2) {
-            return new Reply.Error("ERR wrong number of arguments for 'expire' command");
+            return new Reply.Error("ERR wrong number of arguments for 'pexpire' command");
         }
 
         long millis;
@@ -37,5 +37,18 @@ public final class PexpireCommand implements Command {
     @Override
     public boolean isWrite() {
         return true;
+    }
+
+    @Override
+    public byte[][] toAofArgs(byte[][] fullArgs) {
+        long seconds = Long.parseLong(new String(fullArgs[2], StandardCharsets.US_ASCII));
+        if (seconds <= 0)
+            return fullArgs; // means "delete now", safe to replay as is
+        long at = System.currentTimeMillis() + seconds;
+        return new byte[][] {
+                "PEXPIREAT".getBytes(StandardCharsets.US_ASCII),
+                fullArgs[1],
+                Long.toString(at).getBytes(StandardCharsets.US_ASCII)
+        };
     }
 }

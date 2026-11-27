@@ -4,10 +4,15 @@ import dev.anas.redis.protocol.Reply;
 
 public interface Command {
 
+    default byte[][] toAofArgs(byte[][] fullArgs) {
+        return fullArgs;
+    }
+
     Reply WRONGTYPE = new Reply.Error("WRONGTYPE Operation against a key holding the wrong kind of value");
 
     Reply execute(byte[][] args);
 
-    // True if this command mutates the store : used by AOF to decide what to persist.
+    // True if this command mutates the store : used by AOF to decide what to
+    // persist.
     boolean isWrite();
 }
